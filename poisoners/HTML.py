@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 #
-# This file is part of Responder which was originally written by
-# Laurent Gaffie - Trustwave Holdings
+# This file is part of the Responder project which was originally written
+# by Laurent Gaffie - Trustwave Holdings, the code in this file is based upon
+# a Transparent HTTP proxy written by Erik Johansson and can be found at:
+# https://github.com/erijo/transparent-proxy
 #
-# This poisoner is original work by Felix Ryan
+# This poisoner has been converted for purpose, brought together with other
+# peoples code and generally faffed around with by Felix Ryan.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,111 +21,133 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-HOST = "0.0.0.0"
-PORTS = [3128]
-VERBOSE = True
-TESTING = True
-
-TESTING_FILE_clientreq = 'HTMLpoisoner.clientreq.raw'
-TESTING_FILE_clientres = 'HTMLpoisoner.clientres.raw'
-TESTING_FILE_serverreq = 'HTMLpoisoner.serverreq.raw'
-TESTING_FILE_serverres = 'HTMLpoisoner.serverres.raw'
-
-# library imports
-from thread import *
-import socket
+from twisted.web import http
+from twisted.internet import reactor, protocol
+from twisted.python import log
 import sys
-import os
 
-def cleanup():
-    try:  # delete the smb.bin file if it exists - this is used for raw connection testing
-        os.remove(TESTING_FILE_clientreq)
-        os.remove(TESTING_FILE_clientres)
-        os.remove(TESTING_FILE_serverreq)
-        os.remove(TESTING_FILE_serverres)
-    except:
-        pass
-
-def createSocketListener(host, port):
-    try:
-        ServerSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        ServerSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #attempt to avoid socket lock problems
-        if VERBOSE:
-            print "Socket build complete ("+host+":"+str(port)+")"
-    except socket.error as errMsg:
-        print "[!] Failed to create socket ("+host+":"+str(port)+")\n" + str(errMsg)
-        sys.exit()
-
-    try:
-        ServerSocket.bind((host, port))
-        if VERBOSE:
-            print "Socket bind complete ("+host+":"+str(port)+")"
-    except socket.error as errMsg:
-        print "[!] Failed to bind socket ("+host+":"+str(port)+")\n" + str(errMsg)
-        sys.exit()
-    ServerSocket.listen(10)
-    return ServerSocket
-
-def connectionHandler(connection):
-    sendWelcome(connection)
-    data = acceptConnection(connection)
-    if TESTING:
-        writeRawData(TESTING_FILE_clientreq)
-    dataType = detectReqType(data)
-    if dataType != False:
-        print dataType
-
-def sendBanner(connection):
-    connection.send("The HTML Poisoner service at your service maam...")
-    if TESTING:
-        print "Welcome sent to potential victim"
-
-def acceptConnection(connection):
-    data = connection.recv(4096)
-    if TESTING:
-        print str(len(data))+" bytes received"
-        connection.close()
-    return str(data)
-
-def writeRawData(data, filename):
-    if VERBOSE:
-        print "Attempting to write raw data to disk ("+filename+") for testing purposes"
-    outputFile = open(filename, "ab")
-    outputFile.write(data)
-    outputFile.close()
-
-def detectReqType(data):
-    if data[5:8] == "SMB":
-        return True
-    else:
-        if TESTING:
-            print data[5:8]
-        return False
-
-def main():
-    if TESTING:
-        cleanup() #make sure no previous raw file captures are present
-    SMBsocket = createSocketListener(HOST, PORTS[1])
-    if VERBOSE:
-        print "SMB Socket listen complete"
+log.startLogging(sys.stdout)
 
 
-    while True:
-        connection, address = SMBsocket.accept()
-        if VERBOSE:
-            print "Connection from: " + address[0] + ":" + str(address[1])
-        start_new_thread(connectionHandler, (connection,))
+class ProxyClient(http.HTTPClient):
+    """ The proxy client connects to the real server, fetches the resource and
+    sends it back to the original client, possibly in a slightly different
+    form.
+    """
 
-    SMBsocket.close
+    def __init__(self, method, uri, postData, headers, originalRequest):
+        self.method = method
+        self.uri = uri
+        self.postData = postData
+        self.headers = headers
+        self.originalRequest = originalRequest
+        self.contentLength = None
+
+    def sendRequest(self):
+        log.msg("Sending request: %s %s" % (self.method, self.uri))
+        self.sendCommand(self.method, self.uri)
+
+    def sendHeaders(self):
+        for key, values in self.headers:
+            if key.lower() == 'connection':
+                values = ['close']
+            elif key.lower() == 'keep-alive':
+                next
+
+            for value in values:
+                self.sendHeader(key, value)
+        self.endHeaders()
+
+    def sendPostData(self):
+        log.msg("Sending POST data")
+        self.transport.write(self.postData)
+
+    def connectionMade(self):
+        log.msg("HTTP connection made")
+        self.sendRequest()
+        self.sendHeaders()
+        if self.method == 'POST':
+            self.sendPostData()
+
+    def handleStatus(self, version, code, message):
+        log.msg("Got server response: %s %s %s" % (version, code, message))
+        self.originalRequest.setResponseCode(int(code), message)
+
+    def handleHeader(self, key, value):
+        if key.lower() == 'content-length':
+            self.contentLength = value
+        else:
+            self.originalRequest.responseHeaders.addRawHeader(key, value)
+
+    def handleResponse(self, data):
+        data = self.originalRequest.processResponse(data)
+
+        if self.contentLength != None:
+            self.originalRequest.setHeader('Content-Length', len(data))
+
+        self.originalRequest.write(data)
+
+        self.originalRequest.finish()
+        self.transport.loseConnection()
 
 
+class ProxyClientFactory(protocol.ClientFactory):
+    def __init__(self, method, uri, postData, headers, originalRequest):
+        self.protocol = ProxyClient
+        self.method = method
+        self.uri = uri
+        self.postData = postData
+        self.headers = headers
+        self.originalRequest = originalRequest
 
-if __name__ == '__main__':
-    try:
-        main()
-    except KeyboardInterrupt:
-        print 'User signaled exit...'
-        try:
-            sys.exit(0)
-        except SystemExit:
-            os._exit(0)
+    def buildProtocol(self, addr):
+        return self.protocol(self.method, self.uri, self.postData,
+                             self.headers, self.originalRequest)
+
+    def clientConnectionFailed(self, connector, reason):
+        log.err("Server connection failed: %s" % reason)
+        self.originalRequest.setResponseCode(504)
+        self.originalRequest.finish()
+
+
+class ProxyRequest(http.Request):
+    def __init__(self, channel, queued, reactor=reactor):
+        http.Request.__init__(self, channel, queued)
+        self.reactor = reactor
+
+    def process(self):
+        host = self.getHeader('host')
+        if not host:
+            log.err("No host header given")
+            self.setResponseCode(400)
+            self.finish()
+            return
+
+        port = 80
+        if ':' in host:
+            host, port = host.split(':')
+            port = int(port)
+
+        self.setHost(host, port)
+
+        self.content.seek(0, 0)
+        postData = self.content.read()
+        factory = ProxyClientFactory(self.method, self.uri, postData,
+                                     self.requestHeaders.getAllRawHeaders(),
+                                     self)
+        self.reactor.connectTCP(host, port, factory)
+
+    def processResponse(self, data):
+        return data
+
+
+class TransparentProxy(http.HTTPChannel):
+    requestFactory = ProxyRequest
+
+
+class ProxyFactory(http.HTTPFactory):
+    protocol = TransparentProxy
+
+
+reactor.listenTCP(3128, ProxyFactory())
+reactor.run()

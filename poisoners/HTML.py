@@ -21,6 +21,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+TESTING = True
+
 from twisted.web import http
 from twisted.internet import reactor, protocol
 from twisted.python import log
@@ -42,6 +44,7 @@ class ProxyClient(http.HTTPClient):
         self.headers = headers
         self.originalRequest = originalRequest
         self.contentLength = None
+        log.msg(self.headers)
 
     def sendRequest(self):
         log.msg("Sending request: %s %s" % (self.method, self.uri))
@@ -53,6 +56,9 @@ class ProxyClient(http.HTTPClient):
                 values = ['close']
             elif key.lower() == 'keep-alive':
                 next
+
+            if key.lower() == 'accept-encoding':
+                values = ['none']
 
             for value in values:
                 self.sendHeader(key, value)
@@ -81,6 +87,8 @@ class ProxyClient(http.HTTPClient):
 
     def handleResponse(self, data):
         data = self.originalRequest.processResponse(data)
+        data = data.replace('</body>', '<img src="file://htmlinject/random.jpg" alt="" /></body>')
+        self.writeRawData(data, "testfile.bin")
 
         if self.contentLength != None:
             self.originalRequest.setHeader('Content-Length', len(data))
@@ -89,6 +97,13 @@ class ProxyClient(http.HTTPClient):
 
         self.originalRequest.finish()
         self.transport.loseConnection()
+
+    def writeRawData(self, data, filename):
+        if TESTING:
+            log.msg("Attempting to write raw data to disk (" + filename + ") for testing purposes")
+        outputFile = open(filename, "ab")
+        outputFile.write(data)
+        outputFile.close()
 
 
 class ProxyClientFactory(protocol.ClientFactory):

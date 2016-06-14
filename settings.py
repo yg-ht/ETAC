@@ -66,7 +66,7 @@ class Settings:
 
 	def populate(self, options):
 
-		if options.Interface is None and IsOsX() is False:
+		if options.Interface is None and utils.IsOsX() is False:
 			print utils.color("Error: -I <if> mandatory option is missing", 1)
 			sys.exit(-1)
 
@@ -160,6 +160,7 @@ class Settings:
 		self.Interface       = options.Interface
 		self.OURIP           = options.OURIP
 		self.Force_WPAD_Auth = options.Force_WPAD_Auth
+		self.HTML_On_Off     = options.HTML_On_Off
 		self.Upstream_Proxy  = options.Upstream_Proxy
 		self.AnalyzeMode     = options.Analyze
 		self.Verbose         = options.Verbose

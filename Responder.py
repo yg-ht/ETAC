@@ -30,12 +30,13 @@ banner()
 parser = optparse.OptionParser(usage='python %prog -I eth0 -w -r -f\nor:\npython %prog -I eth0 -wrf', version=settings.__version__, prog=sys.argv[0])
 parser.add_option('-A','--analyze',        action="store_true", help="Analyze mode. This option allows you to see NBT-NS, BROWSER, LLMNR requests without responding.", dest="Analyze", default=False)
 parser.add_option('-I','--interface',      action="store",      help="Network interface to use", dest="Interface", metavar="eth0", default=None)
-parser.add_option('-i','--ip',      action="store",      help="Local IP to use \033[1m\033[31m(only for OSX)\033[0m", dest="OURIP", metavar="10.0.0.21", default=None)
+parser.add_option('-i','--ip',             action="store",      help="Local IP to use \033[1m\033[31m(only for OSX)\033[0m", dest="OURIP", metavar="10.0.0.21", default=None)
 parser.add_option('-b', '--basic',         action="store_true", help="Return a Basic HTTP authentication. Default: NTLM", dest="Basic", default=False)
 parser.add_option('-r', '--wredir',        action="store_true", help="Enable answers for netbios wredir suffix queries. Answering to wredir will likely break stuff on the network. Default: False", dest="Wredirect", default=False)
 parser.add_option('-d', '--NBTNSdomain',   action="store_true", help="Enable answers for netbios domain suffix queries. Answering to domain suffixes will likely break stuff on the network. Default: False", dest="NBTNSDomain", default=False)
 parser.add_option('-f','--fingerprint',    action="store_true", help="This option allows you to fingerprint a host that issued an NBT-NS or LLMNR query.", dest="Finger", default=False)
 parser.add_option('-w','--wpad',           action="store_true", help="Start the WPAD rogue proxy server. Default value is False", dest="WPAD_On_Off", default=False)
+parser.add_option('-H','--html-poisoner',  action="store_true", help="Enable the HTML poisoning proxy. Default value is False", dest="HTML_On_Off", default=False)
 parser.add_option('-u','--upstream-proxy', action="store",      help="Upstream HTTP proxy used by the rogue WPAD Proxy for outgoing requests (format: host:port)", dest="Upstream_Proxy", default=None)
 parser.add_option('-F','--ForceWpadAuth',  action="store_true", help="Force NTLM/Basic authentication on wpad.dat file retrieval. This may cause a login prompt. Default: False", dest="Force_WPAD_Auth", default=False)
 parser.add_option('--lm',                  action="store_true", help="Force LM hashing downgrade for Windows XP/2003 and earlier. Default: False", dest="LM_On_Off", default=False)
@@ -183,13 +184,19 @@ def main():
 	try:
 		threads = []
 
-		# Load (M)DNS, NBNS and LLMNR Poisoners
+		# Load (M)DNS, NBNS, LLMNR and HTML Poisoners
 		from poisoners.LLMNR import LLMNR
 		from poisoners.NBTNS import NBTNS
 		from poisoners.MDNS import MDNS
 		threads.append(Thread(target=serve_LLMNR_poisoner, args=('', 5355, LLMNR,)))
 		threads.append(Thread(target=serve_MDNS_poisoner,  args=('', 5353, MDNS,)))
-		threads.append(Thread(target=serve_NBTNS_poisoner, args=('', 137,  NBTNS,)))
+		threads.append(Thread(target=serve_NBTNS_poisoner, args=('', 137, NBTNS,)))
+		if settings.Config.HTML_On_Off:
+			import poisoners.HTML
+			try:
+				poisoners.HTML.main()
+			except Exception as err:
+				print color("[!] ", 1, 1) + "Error starting HTML poisoner: " + err
 
 		# Load Browser Listener
 		from servers.Browser import Browser
@@ -262,7 +269,7 @@ def main():
 			time.sleep(1)
 
 	except KeyboardInterrupt:
-		sys.exit("\r%s Exiting..." % color('[+]', 2, 1))
+		poisoners.HTML.sys.exit("\r%s Exiting..." % color('[+]', 2, 1))
 
 if __name__ == '__main__':
 	main()

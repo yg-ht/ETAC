@@ -22,6 +22,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 TESTING = True
+VERBOSE = True
 
 from twisted.web import http
 from twisted.internet import reactor, protocol
@@ -44,10 +45,10 @@ class ProxyClient(http.HTTPClient):
         self.headers = headers
         self.originalRequest = originalRequest
         self.contentLength = None
-        log.msg(self.headers)
 
     def sendRequest(self):
-        log.msg("Sending request: %s %s" % (self.method, self.uri))
+        if VERBOSE:
+            log.msg("Sending request: %s %s" % (self.method, self.uri))
         self.sendCommand(self.method, self.uri)
 
     def sendHeaders(self):
@@ -65,18 +66,21 @@ class ProxyClient(http.HTTPClient):
         self.endHeaders()
 
     def sendPostData(self):
-        log.msg("Sending POST data")
+        if VERBOSE:
+            log.msg("Sending POST data")
         self.transport.write(self.postData)
 
     def connectionMade(self):
-        log.msg("HTTP connection made")
+        if VERBOSE:
+            log.msg("HTTP connection made")
         self.sendRequest()
         self.sendHeaders()
         if self.method == 'POST':
             self.sendPostData()
 
     def handleStatus(self, version, code, message):
-        log.msg("Got server response: %s %s %s" % (version, code, message))
+        if VERBOSE:
+            log.msg("Got server response: %s %s %s" % (version, code, message))
         self.originalRequest.setResponseCode(int(code), message)
 
     def handleHeader(self, key, value):
@@ -88,8 +92,8 @@ class ProxyClient(http.HTTPClient):
     def handleResponse(self, data):
         data = self.originalRequest.processResponse(data)
         data = data.replace('</body>', '<img src="file://htmlinject/random.jpg" alt="" /></body>')
-        self.writeRawData(data, "testfile.bin")
-
+        if TESTING:
+            self.writeRawData(data, "testfile.bin")
         if self.contentLength != None:
             self.originalRequest.setHeader('Content-Length', len(data))
 
@@ -120,7 +124,8 @@ class ProxyClientFactory(protocol.ClientFactory):
                              self.headers, self.originalRequest)
 
     def clientConnectionFailed(self, connector, reason):
-        log.err("Server connection failed: %s" % reason)
+        if VERBOSE:
+            log.err("Server connection failed: %s" % reason)
         self.originalRequest.setResponseCode(504)
         self.originalRequest.finish()
 
@@ -133,9 +138,10 @@ class ProxyRequest(http.Request):
     def process(self):
         host = self.getHeader('host')
         if not host:
-            log.err("No host header given")
             self.setResponseCode(400)
             self.finish()
+            if VERBOSE:
+                log.err("No host header given")
             return
 
         port = 80
@@ -164,5 +170,6 @@ class ProxyFactory(http.HTTPFactory):
     protocol = TransparentProxy
 
 
-reactor.listenTCP(3128, ProxyFactory())
-reactor.run()
+def main():
+    reactor.listenTCP(3128, ProxyFactory())
+    reactor.run()

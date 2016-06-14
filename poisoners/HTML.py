@@ -26,11 +26,7 @@ VERBOSE = True
 
 from twisted.web import http
 from twisted.internet import reactor, protocol
-from twisted.python import log
-import sys
-
-log.startLogging(sys.stdout)
-
+from utils import color
 
 class ProxyClient(http.HTTPClient):
     """ The proxy client connects to the real server, fetches the resource and
@@ -48,7 +44,7 @@ class ProxyClient(http.HTTPClient):
 
     def sendRequest(self):
         if VERBOSE:
-            log.msg("Sending request: %s %s" % (self.method, self.uri))
+            print color("[-] ", 1, 1) + "Sending request: %s %s" % (self.method, self.uri)
         self.sendCommand(self.method, self.uri)
 
     def sendHeaders(self):
@@ -67,12 +63,12 @@ class ProxyClient(http.HTTPClient):
 
     def sendPostData(self):
         if VERBOSE:
-            log.msg("Sending POST data")
+            print color("[-] ", 1, 1) + "Sending POST data"
         self.transport.write(self.postData)
 
     def connectionMade(self):
         if VERBOSE:
-            log.msg("HTTP connection made")
+            print color("[-] ", 1, 1) + "HTTP connection made"
         self.sendRequest()
         self.sendHeaders()
         if self.method == 'POST':
@@ -80,7 +76,7 @@ class ProxyClient(http.HTTPClient):
 
     def handleStatus(self, version, code, message):
         if VERBOSE:
-            log.msg("Got server response: %s %s %s" % (version, code, message))
+            print color("[-] ", 1, 1) + "Got server response: %s %s %s" % (version, code, message)
         self.originalRequest.setResponseCode(int(code), message)
 
     def handleHeader(self, key, value):
@@ -92,6 +88,8 @@ class ProxyClient(http.HTTPClient):
     def handleResponse(self, data):
         data = self.originalRequest.processResponse(data)
         data = data.replace('</body>', '<img src="file://htmlinject/random.jpg" alt="" /></body>')
+        if VERBOSE:
+            print color("[+] ", 1, 1) + "HTML poisoning performed"
         if TESTING:
             self.writeRawData(data, "testfile.bin")
         if self.contentLength != None:
@@ -104,7 +102,7 @@ class ProxyClient(http.HTTPClient):
 
     def writeRawData(self, data, filename):
         if TESTING:
-            log.msg("Attempting to write raw data to disk (" + filename + ") for testing purposes")
+            print color("[-] ", 1, 1) + "Attempting to write raw data to disk (" + filename + ") for testing purposes"
         outputFile = open(filename, "ab")
         outputFile.write(data)
         outputFile.close()
@@ -125,7 +123,7 @@ class ProxyClientFactory(protocol.ClientFactory):
 
     def clientConnectionFailed(self, connector, reason):
         if VERBOSE:
-            log.err("Server connection failed: %s" % reason)
+            print color("[-] ", 1, 1) + "Server connection failed: %s" % reason
         self.originalRequest.setResponseCode(504)
         self.originalRequest.finish()
 
@@ -141,7 +139,7 @@ class ProxyRequest(http.Request):
             self.setResponseCode(400)
             self.finish()
             if VERBOSE:
-                log.err("No host header given")
+                print color("[-] ", 1, 1) + "No host header given"
             return
 
         port = 80

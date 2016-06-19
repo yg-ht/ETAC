@@ -14,15 +14,11 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-import sys
 import optparse
-import socket
-import time
-import settings
 import ssl
-
-from SocketServer import TCPServer, UDPServer, ThreadingMixIn, StreamRequestHandler, BaseRequestHandler, BaseServer
+from SocketServer import TCPServer, UDPServer, ThreadingMixIn
 from threading import Thread
+
 from utils import *
 
 banner()
@@ -185,18 +181,18 @@ def main():
 		threads = []
 
 		# Load (M)DNS, NBNS, LLMNR and HTML Poisoners
-		from poisoners.LLMNR import LLMNR
-		from poisoners.NBTNS import NBTNS
-		from poisoners.MDNS import MDNS
+		from poisoners import LLMNR
+		from poisoners import NBTNS
+		from poisoners import MDNS
 		threads.append(Thread(target=serve_LLMNR_poisoner, args=('', 5355, LLMNR,)))
 		threads.append(Thread(target=serve_MDNS_poisoner,  args=('', 5353, MDNS,)))
 		threads.append(Thread(target=serve_NBTNS_poisoner, args=('', 137, NBTNS,)))
 		if settings.Config.HTML_On_Off:
-			import poisoners.HTML
+			from poisoners import HTML
 			try:
-				poisoners.HTML.main()
+				HTML.main()
 			except Exception as err:
-				print color("[!] ", 1, 1) + "Error starting HTML poisoner: " + err
+				print color("[!] ", 1, 1) + "Error starting HTML poisoner: " + str(err)
 
 		# Load Browser Listener
 		from servers.Browser import Browser
@@ -269,7 +265,7 @@ def main():
 			time.sleep(1)
 
 	except KeyboardInterrupt:
-		poisoners.HTML.sys.exit("\r%s Exiting..." % color('[+]', 2, 1))
+		HTML.sys.exit("\r%s Exiting..." % color('[+]', 2, 1))
 
 if __name__ == '__main__':
 		main()

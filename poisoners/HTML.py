@@ -2,7 +2,7 @@
 
 HOST = "0.0.0.0"
 PORT = 3128
-VERBOSE = True
+VERBOSE = False
 TESTING = True
 MAX_CONN = 5
 BUFFER_SIZE = 4096
@@ -33,33 +33,87 @@ def cleanup():
 
 
 def getConnectionString(HeaderOne):
-    method = HeaderOne.split(' ')[0]
-    transport = HeaderOne.split(' ')[1].split('://')[0]
+    # Example HeaderOne value:
+    # GET http://www.google.com:8080/path/to/resource/index.php?q=example HTTP/1.1
+    # the below splits the above into its component parts and creates a dictionary
+    # from example should result in: "GET"
     try:
+        method = HeaderOne.split(' ')[0]
+        if TESTING:
+            print "Method: " + method
+        # from example should result in: "http"
+        transport = HeaderOne.split(' ')[1].split('://')[0]
+        if TESTING:
+            print "Transport: " + transport
+        # from example should result in: "www.google.com:8080"
         hostAndPort = HeaderOne.split(' ')[1].split('://')[1].split('/', 1)[0]
-        host = hostAndPort.split(':')[0]
-        port = hostAndPort.split(':')[1]
-    except IndexError:
-        host = HeaderOne.split(' ')[1].split('://')[1].split('/',1)[0]
-        port = 80
-    URI = '/' + HeaderOne.split(' ')[1].split('://')[1].split('/',1)[1]
+        if TESTING:
+            print "Host and Port: " + hostAndPort
+        try:
+            # from example should result in: "8080" (do this first to trigger the except earlier)
+            port = hostAndPort.split(':')[1]
+            if TESTING:
+                print "Port: " + str(port)
+            # from example should result in: "www.google.com"
+            host = hostAndPort.split(':')[0]
+            if TESTING:
+                print "Host: " + host
+        except IndexError:
+            # from example should result in: "www.google.com"
+            host = HeaderOne.split(' ')[1].split('://')[1].split('/',1)[0]
+            if TESTING:
+                print "Host: " + host
+            port = 80
+            if TESTING:
+                print "Port: " + str(port)
+        URI = '/' + HeaderOne.split(' ')[1].split('://')[1].split('/',1)[1]
+        if TESTING:
+            print "URI: " +  URI
+    except IndexError as ErrMsg:
+        print 'RxHeaderOne issue detected: ' + str(ErrMsg)
+        sys.exit(2)
     connString = {'method' : method, 'transport' : transport, 'host' : host, 'port' : port, 'URI' : URI}
     return connString
 
-def connectionHandler(connection,data,address):
-    HTTPHeaders = getHeaders(data)
-    if TESTING:
-        print HTTPHeaders
+def connectionHandler(RxConnection,RxData,RxAddress):
+    HTTPHeaders = getHeaders(RxData)
     # if HTTPHeaders is not a dictionary, it probably isn't an HTTP request so send the banner
     if HTTPHeaders == False:
-        sendBanner(connection)
-    connectionString = getConnectionString(HTTPHeaders[0])
-    realWebSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    realWebSocket.connect((connectionString['host'],connectionString['port']))
-    realWebSocket.send(data)
-    #carry on from here
+        sendBanner(RxConnection)
+    connectionString = getConnectionString(HTTPHeaders['Req'])
 
-def createSocketListener(host, port):
+    TxData = weakenRequest(RxData)
+
+    # Connect to real web server
+    TxSocket = createSocketTx(connectionString)
+    # Send data to real web server
+    TxSocket.send(TxData)
+
+    while True:
+        # get data response
+        TxResponse = TxSocket.recv(BUFFER_SIZE)
+
+        # if the response exists process it, otherwise don't
+        if len(TxResponse) > 0:
+
+            RxResponse = weakenResponse(TxResponse)
+            RxConnection.send(RxResponse)
+            if TESTING and VERBOSE:
+                print 'Server response sent to proxy client at ' + str(RxAddress)
+        else:
+            break
+    TxSocket.close()
+
+def createSocketTx(connectionString):
+    try:
+        ServerSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        ServerSocket.connect((connectionString['host'], connectionString['port']))
+        return ServerSocket
+    except socket.error as errMsg:
+        print "[!] Failed to connect to server (" + connectionString['transport'] + "://" + connectionString['host'] + ":" + connectionString['port'] + "/" + connectionString['URI'] + ")\n" + str(errMsg)
+        return False
+
+def createSocketRx(host, port):
     try:
         ServerSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         ServerSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #attempt to avoid socket lock problems
@@ -85,7 +139,7 @@ def getHeaders(reqData):
     HTTPHeadersList = HTTPData[0].split("\r\n")
     try:
         # First line is the HTTP method and request
-        HTTPHeadersDict = {HTTPHeadersList[0].split(' ', 1)[0] : HTTPHeadersList[0].split(' ', 1)[1]}
+        HTTPHeadersDict = {'Req' : HTTPHeadersList[0]}
         #The rest are colon separated headers and can be turned into a dictionary
         headerIndex = 0
         for header in HTTPHeadersList:
@@ -111,23 +165,29 @@ def writeRawData(data, filename):
     outputFile.write(data)
     outputFile.close()
 
+def weakenRequest(RxData): #placeholder for future function xxx
+    return RxData
+
+def weakenResponse(TxResponse): #placeholder for future function xxx
+    return TxResponse
+
 #get the thing up and running
 def main():
     if TESTING:
         cleanup() #make sure no previous raw file captures are present
-    PoisonSocket = createSocketListener(HOST, PORT)
+    RxSocket = createSocketRx(HOST, PORT)
 
     #always try and keep a socket open
     while True:
-        connection, address = PoisonSocket.accept()
-        data = acceptConnection(connection)
+        RxConnection, RxAddress = RxSocket.accept()
+        RxData = acceptConnection(RxConnection)
         if TESTING:
-            writeRawData(data, TESTING_FILE_clientreq)
+            writeRawData(RxData, TESTING_FILE_clientreq)
         if VERBOSE:
-            print "Connection from: " + address[0] + ":" + str(address[1])
+            print "Connection from: " + RxAddress[0] + ":" + str(RxAddress[1])
         #when new connections are received, spawn a new thread to handle it
-        start_new_thread(connectionHandler, (connection,data,address))
-    PoisonSocket.close
+        start_new_thread(connectionHandler, (RxConnection,RxData,RxAddress))
+        RxSocket.close
 
 if __name__ == '__main__':
     try:

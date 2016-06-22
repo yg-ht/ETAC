@@ -87,6 +87,11 @@ class Settings:
 		self.DNS_On_Off      = self.toBool(config.get('Responder Core', 'DNS'))
 		self.Krb_On_Off      = self.toBool(config.get('Responder Core', 'Kerberos'))
 
+		# poisoners
+		self.MDNS_On_Off = self.toBool(config.get('Responder Core', 'MDNS'))
+		self.LLMNR_On_Off = self.toBool(config.get('Responder Core', 'LLMNR'))
+		self.NBTNS_On_Off = self.toBool(config.get('Responder Core', 'NBTNS'))
+
 		# Db File
 		self.DatabaseFile    = os.path.join(self.ResponderPATH, config.get('Responder Core', 'Database'))
 

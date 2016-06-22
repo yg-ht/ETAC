@@ -181,18 +181,18 @@ def main():
 		threads = []
 
 		# Load (M)DNS, NBNS, LLMNR and HTML Poisoners
-		from poisoners import LLMNR
-		from poisoners import NBTNS
-		from poisoners import MDNS
-		threads.append(Thread(target=serve_LLMNR_poisoner, args=('', 5355, LLMNR,)))
-		threads.append(Thread(target=serve_MDNS_poisoner,  args=('', 5353, MDNS,)))
-		threads.append(Thread(target=serve_NBTNS_poisoner, args=('', 137, NBTNS,)))
+		if settings.Config.LLMNR_On_Off:
+			from poisoners import LLMNR
+			threads.append(Thread(target=serve_LLMNR_poisoner, args=('', 5355, LLMNR,)))
+		if settings.Config.MDNS_On_Off:
+			from poisoners import MDNS
+			threads.append(Thread(target=serve_MDNS_poisoner,  args=('', 5353, MDNS,)))
+		if settings.Config.NBTNS_On_Off:
+			from poisoners import NBTNS
+			threads.append(Thread(target=serve_NBTNS_poisoner, args=('', 137, NBTNS,)))
 		if settings.Config.HTML_On_Off:
 			from poisoners import HTML
-			try:
-				HTML.main()
-			except Exception as err:
-				print color("[!] ", 1, 1) + "Error starting HTML poisoner: " + str(err)
+			threads.append(Thread(target=HTML.main))
 
 		# Load Browser Listener
 		from servers.Browser import Browser
@@ -265,6 +265,8 @@ def main():
 			time.sleep(1)
 
 	except KeyboardInterrupt:
+		if settings.Config.HTML_On_Off:
+			os.system('iptables -D PREROUTING -t nat -i br-lan -p tcp --dport 80 -j REDIRECT --to-port 3128')
 		HTML.sys.exit("\r%s Exiting..." % color('[+]', 2, 1))
 
 if __name__ == '__main__':

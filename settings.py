@@ -75,22 +75,9 @@ class Settings:
 		config.read(os.path.join(self.ResponderPATH, 'Responder.conf'))
 
 		# Servers
-		self.HTTP_On_Off     = self.toBool(config.get('Responder Core', 'HTTP'))
-		self.SSL_On_Off      = self.toBool(config.get('Responder Core', 'HTTPS'))
 		self.SMB_On_Off      = self.toBool(config.get('Responder Core', 'SMB'))
-		self.SQL_On_Off      = self.toBool(config.get('Responder Core', 'SQL'))
-		self.FTP_On_Off      = self.toBool(config.get('Responder Core', 'FTP'))
-		self.POP_On_Off      = self.toBool(config.get('Responder Core', 'POP'))
-		self.IMAP_On_Off     = self.toBool(config.get('Responder Core', 'IMAP'))
-		self.SMTP_On_Off     = self.toBool(config.get('Responder Core', 'SMTP'))
-		self.LDAP_On_Off     = self.toBool(config.get('Responder Core', 'LDAP'))
 		self.DNS_On_Off      = self.toBool(config.get('Responder Core', 'DNS'))
 		self.Krb_On_Off      = self.toBool(config.get('Responder Core', 'Kerberos'))
-
-		# poisoners
-		self.MDNS_On_Off = self.toBool(config.get('Responder Core', 'MDNS'))
-		self.LLMNR_On_Off = self.toBool(config.get('Responder Core', 'LLMNR'))
-		self.NBTNS_On_Off = self.toBool(config.get('Responder Core', 'NBTNS'))
 
 		# Db File
 		self.DatabaseFile    = os.path.join(self.ResponderPATH, config.get('Responder Core', 'Database'))
@@ -105,45 +92,12 @@ class Settings:
 		self.PoisonersLogFile    = os.path.join(self.LogDir, config.get('Responder Core', 'PoisonersLog'))
 		self.AnalyzeLogFile      = os.path.join(self.LogDir, config.get('Responder Core', 'AnalyzeLog'))
 
-		self.FTPLog          = os.path.join(self.LogDir, 'FTP-Clear-Text-Password-%s.txt')
-		self.IMAPLog         = os.path.join(self.LogDir, 'IMAP-Clear-Text-Password-%s.txt')
-		self.POP3Log         = os.path.join(self.LogDir, 'POP3-Clear-Text-Password-%s.txt')
-		self.HTTPBasicLog    = os.path.join(self.LogDir, 'HTTP-Clear-Text-Password-%s.txt')
-		self.LDAPClearLog    = os.path.join(self.LogDir, 'LDAP-Clear-Text-Password-%s.txt')
 		self.SMBClearLog     = os.path.join(self.LogDir, 'SMB-Clear-Text-Password-%s.txt')
-		self.SMTPClearLog    = os.path.join(self.LogDir, 'SMTP-Clear-Text-Password-%s.txt')
-		self.MSSQLClearLog   = os.path.join(self.LogDir, 'MSSQL-Clear-Text-Password-%s.txt')
-
-		self.LDAPNTLMv1Log   = os.path.join(self.LogDir, 'LDAP-NTLMv1-Client-%s.txt')
-		self.HTTPNTLMv1Log   = os.path.join(self.LogDir, 'HTTP-NTLMv1-Client-%s.txt')
-		self.HTTPNTLMv2Log   = os.path.join(self.LogDir, 'HTTP-NTLMv2-Client-%s.txt')
 		self.KerberosLog     = os.path.join(self.LogDir, 'MSKerberos-Client-%s.txt')
-		self.MSSQLNTLMv1Log  = os.path.join(self.LogDir, 'MSSQL-NTLMv1-Client-%s.txt')
-		self.MSSQLNTLMv2Log  = os.path.join(self.LogDir, 'MSSQL-NTLMv2-Client-%s.txt')
 		self.SMBNTLMv1Log    = os.path.join(self.LogDir, 'SMB-NTLMv1-Client-%s.txt')
 		self.SMBNTLMv2Log    = os.path.join(self.LogDir, 'SMB-NTLMv2-Client-%s.txt')
 		self.SMBNTLMSSPv1Log = os.path.join(self.LogDir, 'SMB-NTLMSSPv1-Client-%s.txt')
 		self.SMBNTLMSSPv2Log = os.path.join(self.LogDir, 'SMB-NTLMSSPv2-Client-%s.txt')
-
-		# HTTP Options
-		self.Serve_Exe	      = self.toBool(config.get('HTTP Server', 'Serve-Exe'))
-		self.Serve_Always     = self.toBool(config.get('HTTP Server', 'Serve-Always'))
-		self.Serve_Html       = self.toBool(config.get('HTTP Server', 'Serve-Html'))
-		self.Html_Filename    = config.get('HTTP Server', 'HtmlFilename')
-		self.Exe_Filename     = config.get('HTTP Server', 'ExeFilename')
-		self.Exe_DlName       = config.get('HTTP Server', 'ExeDownloadName')
-		self.WPAD_Script      = config.get('HTTP Server', 'WPADScript')
-		self.HtmlToInject     = config.get('HTTP Server', 'HtmlToInject')
-
-		if not os.path.exists(self.Html_Filename):
-			print utils.color("/!\ Warning: %s: file not found" % self.Html_Filename, 3, 1)
-
-		if not os.path.exists(self.Exe_Filename):
-			print utils.color("/!\ Warning: %s: file not found" % self.Exe_Filename, 3, 1)
-
-		# SSL Options
-		self.SSLKey  = config.get('HTTPS Server', 'SSLKey')
-		self.SSLCert = config.get('HTTPS Server', 'SSLCert')
 
 		# Respond to hosts
 		self.RespondTo         = filter(None, [x.upper().strip() for x in config.get('Responder Core', 'RespondTo').strip().split(',')])
@@ -170,9 +124,6 @@ class Settings:
 		self.AnalyzeMode     = options.Analyze
 		self.Verbose         = options.Verbose
 		self.CommandLine     = str(sys.argv)
-
-		if self.HtmlToInject is None:
-			self.HtmlToInject = ''
 
 		self.Bind_To = utils.FindLocalIP(self.Interface, self.OURIP)
 

@@ -252,34 +252,27 @@ def Decode_Name(nbname):
 	except:
 		return "Illegal NetBIOS name"
 
-def NBT_NS_Role(data):
-	Role = {
-		"\x41\x41\x00":"Workstation/Redirector",
-		"\x42\x4c\x00":"Domain Master Browser",
-		"\x42\x4d\x00":"Domain Controller",
-		"\x42\x4e\x00":"Local Master Browser",
-		"\x42\x4f\x00":"Browser Election",
-		"\x43\x41\x00":"File Server",
-		"\x41\x42\x00":"Browser",
-	}
-
-	return Role[data] if data in Role else "Service not known"
-
 def banner():
 
 	banner = "\n".join([
-		'                                         __',
-		'  .----.-----.-----.-----.-----.-----.--|  |.-----.----.',
-		'  |   _|  -__|__ --|  _  |  _  |     |  _  ||  -__|   _|',
-		'  |__| |_____|_____|   __|_____|__|__|_____||_____|__|',
-		'                   |__|'
+		'__/\\\\\\\\\\\\\\\__/\\\\\\\\\\\\\\\_____/\\\\\\\\\___________/\\\\\\\\\_        ',
+		' _\/\\\///////////__\///////\\\/////____/\\\\\\\\\\\\\______/\\\////////__       ',
+  		'  _\/\\\___________________\/\\\________/\\\/////////\\\___/\\\/___________      ',
+   		'   _\/\\\\\\\\\\\___________\/\\\_______\/\\\_______\/\\\__/\\\_____________     ',
+   		'    _\/\\\///////____________\/\\\_______\/\\\\\\\\\\\\\\\_\/\\\_____________    ',
+ 		'     _\/\\\___________________\/\\\_______\/\\\/////////\\\_\//\\\____________   ',
+		'      _\/\\\___________________\/\\\_______\/\\\_______\/\\\__\///\\\__________  ',
+		'       _\/\\\\\\\\\\\\\\\_______\/\\\_______\/\\\_______\/\\\____\////\\\\\\\\\_ ',
+		'        _\///////////////________\///________\///________\///________\/////////__'
 	])
 
 	print banner
-	print "\n           \033[1;33mNBT-NS, LLMNR & MDNS %s\033[0m" % settings.__version__
+	print "\n \033[1;33mMitM HTML poisoner & SMB Auth capture built for the WiFiPineapple mkV%s\033[0m"
 	print ""
-	print "  Author: Laurent Gaffie (laurent.gaffie@gmail.com)"
-	print "  To kill this script hit CRTL-C"
+	print "\n Version:" + settings.__version__
+	print "  Author: Felix Ryan (f@felixrr.pro)"
+	print "  Uses code from the Responder project, authored by: Laurent Gaffie (laurent.gaffie@gmail.com)"
+	print "  To kill this script hit CTRL-C"
 	print ""
 
 def StartupMessage():
@@ -288,32 +281,11 @@ def StartupMessage():
 
 	print ""
 	print color("[+] ", 2, 1) + "Poisoners:"
-	print '    %-27s' % "LLMNR" + enabled
-	print '    %-27s' % "NBT-NS" + enabled
-	print '    %-27s' % "DNS/MDNS" + enabled
+	print '    %-27s' % "HTML" + enabled
 	print ""
 
 	print color("[+] ", 2, 1) + "Servers:"
-	print '    %-27s' % "HTTP server" + (enabled if settings.Config.HTTP_On_Off else disabled)
-	print '    %-27s' % "HTTPS server" + (enabled if settings.Config.SSL_On_Off else disabled)
-	print '    %-27s' % "WPAD proxy" + (enabled if settings.Config.WPAD_On_Off else disabled)
 	print '    %-27s' % "SMB server" + (enabled if settings.Config.SMB_On_Off else disabled)
-	print '    %-27s' % "Kerberos server" + (enabled if settings.Config.Krb_On_Off else disabled)
-	print '    %-27s' % "SQL server" + (enabled if settings.Config.SQL_On_Off else disabled)
-	print '    %-27s' % "FTP server" + (enabled if settings.Config.FTP_On_Off else disabled)
-	print '    %-27s' % "IMAP server" + (enabled if settings.Config.IMAP_On_Off else disabled)
-	print '    %-27s' % "POP3 server" + (enabled if settings.Config.POP_On_Off else disabled)
-	print '    %-27s' % "SMTP server" + (enabled if settings.Config.SMTP_On_Off else disabled)
-	print '    %-27s' % "DNS server" + (enabled if settings.Config.DNS_On_Off else disabled)
-	print '    %-27s' % "LDAP server" + (enabled if settings.Config.LDAP_On_Off else disabled)
-	print ""
-
-	print color("[+] ", 2, 1) + "HTTP Options:"
-	print '    %-27s' % "Always serving EXE" + (enabled if settings.Config.Serve_Always else disabled)
-	print '    %-27s' % "Serving EXE" + (enabled if settings.Config.Serve_Exe else disabled)
-	print '    %-27s' % "Serving HTML" + (enabled if settings.Config.Serve_Html else disabled)
-	print '    %-27s' % "Upstream Proxy" + (enabled if settings.Config.Upstream_Proxy else disabled)
-	#print '    %-27s' % "WPAD script" + settings.Config.WPAD_Script
 	print ""
 
 	print color("[+] ", 2, 1) + "Poisoning Options:"
@@ -331,18 +303,6 @@ def StartupMessage():
 
 	if settings.Config.Upstream_Proxy:
 		print '    %-27s' % "Upstream Proxy" + color('[%s]' % settings.Config.Upstream_Proxy, 5, 1)
-
-	if len(settings.Config.RespondTo):
-		print '    %-27s' % "Respond To" + color(str(settings.Config.RespondTo), 5, 1)
-
-	if len(settings.Config.RespondToName):
-		print '    %-27s' % "Respond To Names" + color(str(settings.Config.RespondToName), 5, 1)
-
-	if len(settings.Config.DontRespondTo):
-		print '    %-27s' % "Don't Respond To" + color(str(settings.Config.DontRespondTo), 5, 1)
-
-	if len(settings.Config.DontRespondToName):
-		print '    %-27s' % "Don't Respond To Names" + color(str(settings.Config.DontRespondToName), 5, 1)
 
 	print ""
 	print ""

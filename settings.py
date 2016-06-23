@@ -21,7 +21,7 @@ import utils
 import logging
 import ConfigParser
 
-__version__ = 'Responder 2.3'
+__version__ = 'ETAC 0.9'
 
 class Settings:
 	
@@ -61,9 +61,6 @@ class Settings:
 								ret.append('%d.%d.%d.%d' % (a, b, c, d))
 			return ret
 
-		self.RespondTo = expand_ranges(self.RespondTo)
-		self.DontRespondTo = expand_ranges(self.DontRespondTo)
-
 	def populate(self, options):
 
 		if options.Interface is None and utils.IsOsX() is False:
@@ -72,15 +69,14 @@ class Settings:
 
 		# Config parsing
 		config = ConfigParser.ConfigParser()
-		config.read(os.path.join(self.ResponderPATH, 'Responder.conf'))
+		config.read(os.path.join(self.ResponderPATH, 'ETAC.conf'))
 
 		# Servers
-		self.SMB_On_Off      = self.toBool(config.get('Responder Core', 'SMB'))
-		self.DNS_On_Off      = self.toBool(config.get('Responder Core', 'DNS'))
-		self.Krb_On_Off      = self.toBool(config.get('Responder Core', 'Kerberos'))
+		self.SMB_On_Off      = self.toBool(config.get('ETAC Core', 'SMB'))
+		self.Krb_On_Off      = self.toBool(config.get('ETAC Core', 'Kerberos'))
 
 		# Db File
-		self.DatabaseFile    = os.path.join(self.ResponderPATH, config.get('Responder Core', 'Database'))
+		self.DatabaseFile    = os.path.join(self.ResponderPATH, config.get('ETAC Core', 'Database'))
 
 		# Log Files
 		self.LogDir = os.path.join(self.ResponderPATH, 'logs')
@@ -88,9 +84,9 @@ class Settings:
 		if not os.path.exists(self.LogDir):
 			os.mkdir(self.LogDir)
 
-		self.SessionLogFile      = os.path.join(self.LogDir, config.get('Responder Core', 'SessionLog'))
-		self.PoisonersLogFile    = os.path.join(self.LogDir, config.get('Responder Core', 'PoisonersLog'))
-		self.AnalyzeLogFile      = os.path.join(self.LogDir, config.get('Responder Core', 'AnalyzeLog'))
+		self.SessionLogFile      = os.path.join(self.LogDir, config.get('ETAC Core', 'SessionLog'))
+		self.PoisonersLogFile    = os.path.join(self.LogDir, config.get('ETAC Core', 'PoisonersLog'))
+		self.AnalyzeLogFile      = os.path.join(self.LogDir, config.get('ETAC Core', 'AnalyzeLog'))
 
 		self.SMBClearLog     = os.path.join(self.LogDir, 'SMB-Clear-Text-Password-%s.txt')
 		self.KerberosLog     = os.path.join(self.LogDir, 'MSKerberos-Client-%s.txt')
@@ -99,14 +95,8 @@ class Settings:
 		self.SMBNTLMSSPv1Log = os.path.join(self.LogDir, 'SMB-NTLMSSPv1-Client-%s.txt')
 		self.SMBNTLMSSPv2Log = os.path.join(self.LogDir, 'SMB-NTLMSSPv2-Client-%s.txt')
 
-		# Respond to hosts
-		self.RespondTo         = filter(None, [x.upper().strip() for x in config.get('Responder Core', 'RespondTo').strip().split(',')])
-		self.RespondToName     = filter(None, [x.upper().strip() for x in config.get('Responder Core', 'RespondToName').strip().split(',')])
-		self.DontRespondTo     = filter(None, [x.upper().strip() for x in config.get('Responder Core', 'DontRespondTo').strip().split(',')])
-		self.DontRespondToName = filter(None, [x.upper().strip() for x in config.get('Responder Core', 'DontRespondToName').strip().split(',')])
-
 		# Auto Ignore List
-		self.AutoIgnore        = self.toBool(config.get('Responder Core', 'AutoIgnoreAfterSuccess'))
+		self.AutoIgnore        = self.toBool(config.get('ETAC Core', 'AutoIgnoreAfterSuccess'))
 		self.AutoIgnoreList    = []
 
 		# CLI options
@@ -131,7 +121,7 @@ class Settings:
 		self.Os_version      = sys.platform
 
 		# Set up Challenge
-		self.NumChal = config.get('Responder Core', 'Challenge')
+		self.NumChal = config.get('ETAC Core', 'Challenge')
 
 		if len(self.NumChal) is not 16:
 			print utils.color("[!] The challenge must be exactly 16 chars long.\nExample: 1122334455667788", 1)
@@ -143,8 +133,8 @@ class Settings:
 
 		# Set up logging
 		logging.basicConfig(filename=self.SessionLogFile, level=logging.INFO, format='%(asctime)s - %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
-		logging.warning('Responder Started: %s' % self.CommandLine)
-		logging.warning('Responder Config: %s' % str(self))
+		logging.warning('ETAC Started: %s' % self.CommandLine)
+		logging.warning('ETAC Config: %s' % str(self))
 
 		Formatter = logging.Formatter('%(asctime)s - %(message)s')
 		PLog_Handler = logging.FileHandler(self.PoisonersLogFile, 'w')

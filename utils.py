@@ -1,6 +1,7 @@
 #!/usr/bin/env python
-# This file is part of Responder
-# Original work by Laurent Gaffie - Trustwave Holdings
+# This file was part of Responder and now is part of ETAC
+# ETAC work by Felix Ryan
+# Responder work by Laurent Gaffie - Trustwave Holdings
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -50,38 +51,6 @@ def text(txt):
 
 	return '\r'+re.sub(r'\[([^]]*)\]', "\033[1;34m[\\1]\033[0m", txt)
 
-def RespondToThisIP(ClientIp):
-
-	if ClientIp.startswith('127.0.0.'):
-		return False
-
-	if settings.Config.AutoIgnore and ClientIp in settings.Config.AutoIgnoreList:
-		print color('[*]', 3, 1), 'Received request from auto-ignored client %s, not answering.' % ClientIp
-		return False
-
-	if len(settings.Config.RespondTo) and ClientIp not in settings.Config.RespondTo:
-		return False
-
-	if ClientIp in settings.Config.RespondTo or settings.Config.RespondTo == []:
-		if ClientIp not in settings.Config.DontRespondTo:
-			return True
-
-	return False
-
-def RespondToThisName(Name):
-
-	if len(settings.Config.RespondToName) and Name.upper() not in settings.Config.RespondToName:
-		return False
-
-	if Name.upper() in settings.Config.RespondToName or settings.Config.RespondToName == []:
-		if Name.upper() not in settings.Config.DontRespondToName:
-			return True
-
-	return False
-
-def RespondToThisHost(ClientIp, Name):
-	return RespondToThisIP(ClientIp) and RespondToThisName(Name)
-
 def IsOsX():
 	return True if settings.Config.Os_version == "darwin" else False
 
@@ -90,6 +59,7 @@ def OsInterfaceIsSupported():
 		return False if IsOsX() else True
 	else:
 		return False
+
 def IsOsX():
     Os_version = sys.platform
     if Os_version == "darwin":
@@ -255,21 +225,22 @@ def Decode_Name(nbname):
 def banner():
 
 	banner = "\n".join([
-		'__/\\\\\\\\\\\\\\\__/\\\\\\\\\\\\\\\_____/\\\\\\\\\___________/\\\\\\\\\_        ',
-		' _\/\\\///////////__\///////\\\/////____/\\\\\\\\\\\\\______/\\\////////__       ',
-  		'  _\/\\\___________________\/\\\________/\\\/////////\\\___/\\\/___________      ',
-   		'   _\/\\\\\\\\\\\___________\/\\\_______\/\\\_______\/\\\__/\\\_____________     ',
-   		'    _\/\\\///////____________\/\\\_______\/\\\\\\\\\\\\\\\_\/\\\_____________    ',
- 		'     _\/\\\___________________\/\\\_______\/\\\/////////\\\_\//\\\____________   ',
-		'      _\/\\\___________________\/\\\_______\/\\\_______\/\\\__\///\\\__________  ',
-		'       _\/\\\\\\\\\\\\\\\_______\/\\\_______\/\\\_______\/\\\____\////\\\\\\\\\_ ',
-		'        _\///////////////________\///________\///________\///________\/////////__'
+		'\n',
+		r'__/\\\\\\\\\\\\\\\__/\\\\\\\\\\\\\\\_____/\\\\\\\\\___________/\\\\\\\\\_        ',
+		r' _\/\\\///////////__\///////\\\/////____/\\\\\\\\\\\\\______/\\\////////__       ',
+  		r'  _\/\\\___________________\/\\\________/\\\/////////\\\___/\\\/___________      ',
+   		r'   _\/\\\\\\\\\\\___________\/\\\_______\/\\\_______\/\\\__/\\\_____________     ',
+   		r'    _\/\\\///////____________\/\\\_______\/\\\\\\\\\\\\\\\_\/\\\_____________    ',
+ 		r'     _\/\\\___________________\/\\\_______\/\\\/////////\\\_\//\\\____________   ',
+		r'      _\/\\\___________________\/\\\_______\/\\\_______\/\\\__\///\\\__________  ',
+		r'       _\/\\\\\\\\\\\\\\\_______\/\\\_______\/\\\_______\/\\\____\////\\\\\\\\\_ ',
+		r'        _\///////////////________\///________\///________\///________\/////////__'
 	])
 
 	print banner
-	print "\n \033[1;33mMitM HTML poisoner & SMB Auth capture built for the WiFiPineapple mkV%s\033[0m"
+	print "\n \033[1;33m         MitM HTML poisoner & SMB Auth capture built for the WiFiPineapple mkV\033[0m"
 	print ""
-	print "\n Version:" + settings.__version__
+	print "  Version: " + settings.__version__
 	print "  Author: Felix Ryan (f@felixrr.pro)"
 	print "  Uses code from the Responder project, authored by: Laurent Gaffie (laurent.gaffie@gmail.com)"
 	print "  To kill this script hit CTRL-C"
@@ -297,8 +268,8 @@ def StartupMessage():
 	print ""
 
 	print color("[+] ", 2, 1) + "Generic Options:"
-	print '    %-27s' % "Responder NIC" + color('[%s]' % settings.Config.Interface, 5, 1)
-	print '    %-27s' % "Responder IP" + color('[%s]' % settings.Config.Bind_To, 5, 1)
+	print '    %-27s' % "Service NIC" + color('[%s]' % settings.Config.Interface, 5, 1)
+	print '    %-27s' % "Service IP" + color('[%s]' % settings.Config.Bind_To, 5, 1)
 	print '    %-27s' % "Challenge set" + color('[%s]' % settings.Config.NumChal, 5, 1)
 
 	if settings.Config.Upstream_Proxy:
@@ -306,44 +277,3 @@ def StartupMessage():
 
 	print ""
 	print ""
-
-# Useful for debugging
-def hexdump(src, l=0x16):
-	res = []
-	sep = '.'
-	src = str(src)
-
-	for i in range(0, len(src), l):
-		s = src[i:i+l]
-		hexa = ''
-
-		for h in range(0,len(s)):
-			if h == l/2:
-				hexa += ' '
-			h = s[h]
-			if not isinstance(h, int):
-				h = ord(h)
-			h = hex(h).replace('0x','')
-			if len(h) == 1:
-				h = '0'+h
-			hexa += h + ' '
-
-		hexa = hexa.strip(' ')
-		text = ''
-
-		for c in s:
-			if not isinstance(c, int):
-				c = ord(c)
-
-			if 0x20 <= c < 0x7F:
-				text += chr(c)
-			else:
-				text += sep
-
-		res.append(('%08X:  %-'+str(l*(2+1)+1)+'s  |%s|') % (i, hexa, text))
-
-	return '\n'.join(res)
-
-def longueur(payload):
-    length = struct.pack(">i", len(''.join(payload)))
-    return length

@@ -1,7 +1,7 @@
 #! /usr/bin/env python
-# NBT-NS/LLMNR Responder
-# Created by Laurent Gaffie
-# Copyright (C) 2014 Trustwave Holdings, Inc.
+# This file was part of Responder and now is part of ETAC
+# ETAC work by Felix Ryan
+# Responder work by Laurent Gaffie - Trustwave Holdings
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by

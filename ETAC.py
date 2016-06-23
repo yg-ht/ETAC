@@ -1,6 +1,7 @@
 #!/usr/bin/env python
-# This file is part of Responder
-# Original work by Laurent Gaffie - Trustwave Holdings
+# This file was part of Responder and now is part of ETAC
+# ETAC work by Felix Ryan
+# Responder work by Laurent Gaffie - Trustwave Holdings
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -54,9 +55,6 @@ settings.Config.populate(options)
 StartupMessage()
 
 settings.Config.ExpandIPRanges()
-
-if settings.Config.AnalyzeMode:
-	print color('[i] Responder is in analyze mode. No NBT-NS, LLMNR, MDNS requests will be poisoned.', 3, 1)
 
 class ThreadingUDPServer(ThreadingMixIn, UDPServer):
 	def server_bind(self):

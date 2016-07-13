@@ -213,6 +213,36 @@ def getConnectionString(RxHeaders, RxConnectionNum, RxAddress):
     return False
 
 
+def getContentLength(TxResponseChunk, RxConnectionNum):
+    if 'Content-Length:' in TxResponseChunk:
+        headersList = TxResponseChunk.split("\r\n\r\n", 1)[0].split("\r\n")
+        for header in headersList:
+            if 'Content-Length:' in header:
+                contentLength = header.split(": ", 1)[1]
+                break
+        if VERBOSETESTING:
+            printMsg(RxConnectionNum, 'Content length is ' + contentLength)
+        return contentLength
+    else:
+        printMsg(RxConnectionNum, 'No content type detected')
+        return False
+
+
+def getContentType(TxResponseChunk, RxConnectionNum):
+    if 'Content-Type:' in TxResponseChunk:
+        headersList = TxResponseChunk.split("\r\n\r\n", 1)[0].split("\r\n")
+        for header in headersList:
+            if 'Content-Type:' in header:
+                contentType = header.split(": ", 1)[1]
+                break
+        if VERBOSETESTING:
+            printMsg(RxConnectionNum, 'Content type is ' + contentType)
+        return contentType
+    else:
+        printMsg(RxConnectionNum, 'No content type detected')
+        return False
+
+
 def getRxReqHeaders(RxRequest, RxConnectionNum):
     # Split out the data section from the headers / preamble
     HTTPData = RxRequest.split("\r\n\r\n", 1)
@@ -300,51 +330,23 @@ def printMsg(RxConnectionNum, msg):
     print 'RxC=' + str(RxConnectionNum) + ':::' + str(msg)
 
 
+def getChunkLength(TxResponseChunk, RxConnectionNum):
+    pass
+
+
 def processTxResponse(TxConnection, RxConnection, RxConnectionNum):
-    checkedForCTE = False # CTE = Chunked Transport Encoding
+    TCPchunkID = 0 # CTE = Chunked Transport Encoding
+    nonCTEcontentReceived = 0
     TxResponse = '' # in here to prevent older versions of Python from complaining about uninitialised variables
     RxResponse = '' # in here to prevent older versions of Python from complaining about uninitialised variables
     while True:
         # get TxResponse
         try:
             TxResponseChunk = TxConnection.recv(BUFFER_SIZE)
+            TCPchunkID += 1
             if VERBOSETESTING:
-                printMsg(RxConnectionNum, 'TxResponse data received')
-            # if the response exists process it, otherwise don't
-            if len(TxResponseChunk) == 0:
-                # break loop if EOF
-                TxConnection.close()
-                if VERBOSE:
-                    printMsg(RxConnectionNum, 'TxConnection Closed - EOF')
-                break
-            else: # else process TxResponse
-                if VERBOSETESTING:
-                    printMsg(RxConnectionNum, 'TxResponse is:' + str(len(TxResponse)) + ' bytes')
-                if not checkedForCTE:
-                    # only check the first TCP chunk (i.e. headers) for CTE as will only be present in headers
-                    CTE = checkForCTE(TxResponseChunk, RxConnectionNum)
-                    checkedForCTE = True
-                if CTE:
-                    # weaken the RxResponse headers
-                    #TxResponseChunk = weakenRxResponse(TxResponseChunk, RxConnectionNum)
-                    # poison the RxResponse body
-                    TxResponseChunk = poisonRxResponse(TxResponseChunk, RxConnectionNum)
-                    # write the current manipulated chunk to disk
-                    writeRawData(TxResponseChunk, TESTING_FILE_RxResponse, RxConnectionNum, True)
-                    # finally send the chunk to the victim
-                    try:
-                        RxConnection.send(TxResponseChunk)
-                        if VERBOSETESTING:
-                            printMsg(RxConnectionNum, 'RxResponse sent')
-                    except socket.error as errMsg:
-                        printMsg(RxConnectionNum, 'RxResponse socket error: ' + str(errMsg))
-                else:
-                    # non CTE, we don't have full response yet, so just append and move onto next loop iteration
-                    TxResponse += TxResponseChunk
-                if TESTING:
-                    writeRawData(TxResponseChunk, TESTING_FILE_TxResponse, RxConnectionNum, True)
-                # don't break here - there might be more data on its way
-        # socket error handling below here
+                printMsg(RxConnectionNum, 'ChunkID = ' + str(TCPchunkID))
+            # socket error handling below here
         except socket.timeout as errMsg:
             if str(errMsg) == 'timed out':
                 if VERBOSE:
@@ -354,8 +356,89 @@ def processTxResponse(TxConnection, RxConnection, RxConnectionNum):
                 printMsg(RxConnectionNum, 'TxConnection closed before expected: ' + str(errMsg))
         except socket.error as errMsg:
             printMsg(RxConnectionNum, 'TxConnection socket error detected: ' + str(errMsg))
+        # if no socket errors, do stuff
+        if VERBOSETESTING:
+            printMsg(RxConnectionNum, 'TxResponse data received')
+        # if the response exists process it, otherwise don't
+        if len(TxResponseChunk) == 0:
+            # break loop if empty chunk received
+            TxConnection.close()
+            if VERBOSE:
+                printMsg(RxConnectionNum, 'TxConnection Closed - Empty chunk')
+            break
+
+        # process TxResponse
+        if VERBOSETESTING:
+            printMsg(RxConnectionNum, 'TxResponse is:' + str(len(TxResponse)) + ' bytes')
+        if TCPchunkID == 1:
+            # only check the first TCP chunk (i.e. headers) for content-type as will only be present in headers
+            contentType = getContentType(TxResponseChunk, RxConnectionNum)
+            # only check the first TCP chunk (i.e. headers) for CTE as will only be present in headers
+            CTE = checkForCTE(TxResponseChunk, RxConnectionNum)
+            # if not CTE, get the content length so that we can close connections quickly
+            if not CTE:
+                nonCTEcontentLength = getContentLength(TxResponseChunk, RxConnectionNum)
+                nonCTEcontentReceived = len(TxResponseChunk.split("\r\n\r\n", 1)[1])
+            else:
+                CTEchunkLength = getChunkLength(TxResponseChunk, RxConnectionNum)
+                CTEchunkReceived = len(TxResponseChunk.split("\r\n\r\n", 1)[1])
+        if 'text/html' in contentType:
+            if CTE:
+                # weaken the RxResponse headers
+                #TxResponseChunk = weakenRxResponse(TxResponseChunk, RxConnectionNum)
+                # poison the RxResponse body
+                #TxResponseChunk = poisonRxResponse(TxResponseChunk, RxConnectionNum)
+                # write the current manipulated chunk to disk
+                if TESTING:
+                    writeRawData(TxResponseChunk, TESTING_FILE_RxResponse, RxConnectionNum, True)
+                # finally send the chunk to the victim
+                try:
+                    RxConnection.send(TxResponseChunk)
+                    if VERBOSETESTING:
+                        printMsg(RxConnectionNum, 'RxResponse sent')
+                except socket.error as errMsg:
+                    printMsg(RxConnectionNum, 'RxResponse socket error: ' + str(errMsg))
+            else:
+                # non CTE, we don't have full response yet, so just append and move onto next loop iteration
+                TxResponse += TxResponseChunk
+        else:
+            # if it isn't HTML, then just do store and forward
+            if VERBOSETESTING:
+                writeRawData(TxResponseChunk, TESTING_FILE_RxResponse, RxConnectionNum, True)
+            try:
+                RxConnection.send(TxResponseChunk)
+                if VERBOSETESTING:
+                    printMsg(RxConnectionNum, 'RxResponse (non-html) sent')
+            except socket.error as errMsg:
+                printMsg(RxConnectionNum, 'RxResponse (non-html) socket error: ' + str(errMsg))
+
+        # keep track of the size of the content
+        if TCPchunkID > 1 and not CTE:
+            nonCTEcontentReceived += len(TxResponseChunk)
+
+        if TESTING:
+            writeRawData(TxResponseChunk, TESTING_FILE_TxResponse, RxConnectionNum, True)
+
+        if CTE:
+            # check if EOF, break if appropriate, otherwise don't
+            if '\r\n0\r\n\r\n' in TxResponseChunk:
+                # process last chunk and then break loop if EOF
+                TxConnection.close()
+                if VERBOSE:
+                    printMsg(RxConnectionNum, 'TxConnection Closed - EOF (CTE)')
+                break
+        else:
+            # check if Content Length has been reached, break if appropriate
+            if VERBOSETESTING:
+                printMsg(RxConnectionNum, 'contentReceived = ' + str(nonCTEcontentReceived) + ' / contentLength = ' + str(nonCTEcontentLength))
+            if int(nonCTEcontentReceived) == int(nonCTEcontentLength):
+                TxConnection.close()
+                if VERBOSE:
+                    printMsg(RxConnectionNum, 'TxConnection Closed - EOF (non-CTE)')
+                break
+
     # we have to wait till we have the whole response to be able to manipulate non-chunked responses,
-    if not CTE:
+    if not CTE and 'text/html' in contentType:
         writeRawData(RxResponse, TESTING_FILE_RxResponse, RxConnectionNum)
         # weaken the RxResponse headers
         IntermediateResponse = weakenRxResponse(TxResponse, RxConnectionNum)

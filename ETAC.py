@@ -174,6 +174,7 @@ def main():
 
     except KeyboardInterrupt:
         if settings.Config.HTML_On_Off:
+            # remove the IPtables redirect rule
             os.system('iptables -D PREROUTING -t nat -i br-lan -p tcp --dport 80 -j REDIRECT --to-port 3128')
         HTML.sys.exit("\r%s Exiting..." % color('[+]', 2, 1))
 

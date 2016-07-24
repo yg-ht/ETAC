@@ -158,11 +158,6 @@ def main():
                 threads.append(Thread(target=serve_thread_tcp, args=('', 445, SMB1,)))
                 threads.append(Thread(target=serve_thread_tcp, args=('', 139, SMB1,)))
 
-        if settings.Config.Krb_On_Off:
-            from servers.Kerberos import KerbTCP, KerbUDP
-            threads.append(Thread(target=serve_thread_udp, args=('', 88, KerbUDP,)))
-            threads.append(Thread(target=serve_thread_tcp, args=('', 88, KerbTCP,)))
-
         for thread in threads:
             thread.setDaemon(True)
             thread.start()

